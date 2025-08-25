@@ -95,27 +95,39 @@ max_runs = 50                   # Stop after 50 scheduled runs
 
 ## 📊 What It Does
 
-### Phase 1: Artist Cache Warming
-- Fetches all artists from Lidarr
-- Creates `/data/mbid-artists.csv` with tracking status
-- Processes artists with concurrent requests until cached or max attempts reached
+### First Run: Cache Discovery
+On first run (no existing CSV files), the tool automatically enables **discovery mode**:
+- **1 attempt per entity** to quickly survey what's already cached
+- Creates baseline CSVs showing current cache state  
+- **Much faster** than full cache warming on potentially cached items
 
-### Phase 2: Release Group Cache Warming (Optional)
-- Fetches all release groups (albums) from Lidarr  
-- Creates `/data/mbid-releasegroups.csv` with artist context
+### Subsequent Runs: Targeted Cache Warming
+
+#### Phase 1: Artist Cache Warming
+- Processes only artists with `status != 'success'` (pending/failed)
+- Uses full attempt limits (25 by default) for intensive cache warming
+- Updates `/data/mbid-artists.csv` with results
+
+#### Phase 2: Release Group Cache Warming (Optional)
 - **Only processes release groups belonging to successfully cached artists**
-- Uses separate attempt limits optimized for release group caching
+- Uses separate attempt limits optimized for release group caching (15 by default)
+- Updates `/data/mbid-releasegroups.csv` with artist context
 
 ### Output
 ```
+🔍 First run detected - no existing CSV files found
+   Enabling force modes for initial cache discovery (1 attempt per entity)
+
 === Phase 1: Processing Artists ===
-[1/250] Checking Artist Name [mbid] ... SUCCESS (code=200, attempts=8)
-[2/250] Checking Another Artist [mbid] ... TIMEOUT (code=503, attempts=25)
-Progress: 50/250 (20.0%) - Rate: 2.1 artists/sec - ETC: 14:32 - API: 3.00 req/sec - Batch: 18/25 success
+[1/250] Checking Artist Name [mbid] ... SUCCESS (code=200, attempts=1)  # Already cached!
+[2/250] Checking Another Artist [mbid] ... TIMEOUT (code=503, attempts=1)  # Needs warming
+Progress: 50/250 (20.0%) - Rate: 4.2 artists/sec - ETC: 14:32 - API: 3.00 req/sec - Batch: 30/50 success
 
 === Phase 2: Processing Release Groups ===
-[1/500] Checking Artist Name - Album Title [mbid] ... SUCCESS (code=200, attempts=3)
+[1/120] Checking Artist Name - Album Title [mbid] ... SUCCESS (code=200, attempts=1)
 ```
+
+**Subsequent runs** use full attempt limits (25 for artists, 15 for RGs) and only process pending items.
 
 ### Generated Files
 - **`/data/mbid-artists.csv`** - Artist cache status tracking
@@ -202,6 +214,9 @@ Cache warming is perfect for APIs where:
 3. **Cache misses return 503/404** until backend completes processing
 4. **Repeated requests eventually succeed** when cache is ready
 
-The tool keeps trying each entity until it gets a 200 response (cache hit) or exhausts attempts. This "warms" the cache so subsequent API users get fast responses.
+### Intelligent Processing
+- **First run**: Quick discovery (1 attempt each) to map current cache state
+- **Subsequent runs**: Intensive warming (25+ attempts) only on items that need it
+- **Dependencies**: Release groups are only processed after their parent artist is successfully cached
 
-**Dependencies**: Release groups are only processed after their parent artist is successfully cached, since RG cache generation typically requires cached artist data.
+This approach minimizes wasted effort and focuses cache warming where it's actually needed.
