@@ -153,7 +153,7 @@ async def check_release_group_with_cache_warming(
     timeout: int = 10
 ) -> Tuple[str, str, int, float]:
     """Check single release group MBID with cache warming - keep trying until success or max attempts"""
-    url = f"{target_base_url.rstrip('/')}/release-group/{rg_mbid}"
+    url = f"{target_base_url.rstrip('/')}/album/{rg_mbid}"
     total_response_time = 0
     
     for attempt in range(max_attempts):
