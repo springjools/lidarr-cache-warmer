@@ -403,6 +403,15 @@ def main():
         cfg["max_attempts_per_rg"] = 1
         print("Force release groups mode enabled: max_attempts_per_rg set to 1 for quick refresh.")
 
+    # Apply config file force modes (should also set attempts to 1)
+    if cfg.get("force_artists", False) and not args.force_artists:
+        cfg["max_attempts_per_artist"] = 1
+        print("Force artists mode enabled from config: max_attempts_per_artist set to 1 for quick refresh.")
+        
+    if cfg.get("force_rg", False) and not args.force_rg:
+        cfg["max_attempts_per_rg"] = 1
+        print("Force release groups mode enabled from config: max_attempts_per_rg set to 1 for quick refresh.")
+
     # Validate configuration
     config_issues = validate_config(cfg)
     if config_issues:
