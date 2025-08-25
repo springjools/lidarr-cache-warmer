@@ -1,0 +1,78 @@
+# /data/config.ini
+# Configuration for lidarr-cache-warmer with dual-phase processing
+
+[lidarr]
+# Set to your Lidarr instance URL and API key
+base_url = http://192.168.1.103:8686
+api_key  = REPLACE_WITH_YOUR_LIDARR_API_KEY
+
+[probe]
+# API endpoint to probe for cache warming
+target_base_url = https://api.lidarr.audio/api/v0.4
+timeout_seconds = 10
+
+# Shared API settings (applies to both artists and release groups)
+delay_between_attempts = 0.5
+max_concurrent_requests = 5
+rate_limit_per_second = 3
+
+# Per-entity cache warming settings
+# Try each artist up to 25 times to warm cache
+max_attempts_per_artist = 25
+# Try each release group up to 15 times to warm cache  
+max_attempts_per_rg = 15
+
+# Circuit breaker settings (stops run if API is completely broken)
+# Stop after this many entities fail completely in a row
+circuit_breaker_threshold = 25
+# How aggressively to back off on errors (0.5 = less aggressive than before)
+backoff_factor = 0.5
+# Maximum wait time before retrying (reduced from 60 to 30 seconds)
+max_backoff_seconds = 30
+
+[ledger]
+# CSV file paths for tracking cache status
+artists_csv_path = /data/mbid-artists.csv
+release_groups_csv_path = /data/mbid-releasegroups.csv
+
+[run]
+# Processing control
+# Enable release group processing (Phase 2)
+process_release_groups = false
+
+# Force modes (re-check already successful entries)
+# When true, sets max attempts to 1 for quick refresh
+force_artists = false
+force_rg = false
+
+# Processing options (frequent saves for safety)
+# Process in batches of 25 entities
+batch_size = 25
+# Save progress every 5 requests
+batch_write_frequency = 5
+
+[schedule]
+# Scheduler settings (used by entrypoint.py for continuous operation)
+# Run every N seconds (3600 = hourly)
+interval_seconds = 3600
+
+# Run immediately when container starts
+run_at_start = true
+
+# Optional: randomize pre-run delay each time, 0 to N seconds
+jitter_seconds = 0
+
+# Stop after a certain number of runs (0 = unlimited, 50 = default)
+max_runs = 50
+
+[actions]
+# Integration settings
+# Tell Lidarr to refresh artist when cache transitions from timeout/unknown -> success
+update_lidarr = false
+
+[monitoring]
+# Logging and progress settings
+# Report progress every N requests
+log_progress_every_n = 25
+# Log level: DEBUG, INFO, WARNING, ERROR
+log_level = INFO

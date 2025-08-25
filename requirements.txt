@@ -1,0 +1,5 @@
+# requirements.txt
+# Dependencies for lidarr-cache-warmer with concurrent processing
+
+requests>=2.25.0,<3
+aiohttp>=3.8.0,<4

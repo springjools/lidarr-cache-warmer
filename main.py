@@ -1,0 +1,614 @@
+#!/usr/bin/env python3
+import argparse
+import configparser
+import csv
+import os
+import sys
+import time
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
+
+import requests
+
+DEFAULT_CONFIG = '''# config.ini
+# Generated automatically on first run. Edit and set your Lidarr API key.
+
+[lidarr]
+# Default Lidarr URL
+base_url = http://192.168.1.103:8686
+api_key  = REPLACE_WITH_YOUR_LIDARR_API_KEY
+
+[probe]
+# API to probe for each MBID
+target_base_url = https://api.lidarr.audio/api/v0.4
+timeout_seconds = 10
+
+# Shared API settings
+delay_between_attempts = 0.5
+max_concurrent_requests = 5
+rate_limit_per_second = 3
+
+# Per-entity cache warming settings
+max_attempts_per_artist = 25
+max_attempts_per_rg = 15
+
+# Circuit breaker settings
+circuit_breaker_threshold = 25
+backoff_factor = 0.5
+max_backoff_seconds = 30
+
+[ledger]
+# CSV file paths
+artists_csv_path = /data/mbid-artists.csv
+release_groups_csv_path = /data/mbid-releasegroups.csv
+
+[run]
+# Processing control
+process_release_groups = false
+force_artists = false
+force_rg = false
+batch_size = 25
+batch_write_frequency = 5
+
+[actions]
+# If true, when a probe transitions from (no status or timeout) -> success,
+# trigger a non-blocking refresh of that artist in Lidarr.
+update_lidarr = false
+
+[schedule]
+# Used by entrypoint.py (scheduler) if you run that directly
+interval_seconds = 3600
+run_at_start = true
+max_runs = 50
+
+[monitoring]
+log_progress_every_n = 25
+log_level = INFO
+'''
+
+
+def iso_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def parse_bool(s: str, default: bool = False) -> bool:
+    if s is None:
+        return default
+    return s.strip().lower() in ("1", "true", "yes", "on")
+
+
+def validate_config(cfg: dict) -> List[str]:
+    """Return list of configuration issues"""
+    issues = []
+    
+    # Check required fields
+    if not cfg.get("api_key") or "REPLACE_WITH_YOUR" in cfg["api_key"]:
+        issues.append("Missing or placeholder Lidarr API key")
+    
+    # Validate URLs
+    for url_key in ["lidarr_url", "target_base_url"]:
+        if not cfg.get(url_key, "").startswith(("http://", "https://")):
+            issues.append(f"Invalid URL format for {url_key}")
+    
+    # Check numeric ranges
+    if cfg.get("timeout_seconds", 0) < 1:
+        issues.append("timeout_seconds must be >= 1")
+    
+    if cfg.get("rate_limit_per_second", 0) <= 0:
+        issues.append("rate_limit_per_second must be > 0")
+    
+    if cfg.get("max_concurrent_requests", 0) < 1:
+        issues.append("max_concurrent_requests must be >= 1")
+        
+    return issues
+
+
+def load_config(path: str) -> dict:
+    """Load INI config and return a normalized dict of settings with defaults."""
+    if not os.path.exists(path) and os.path.exists(path + ".ini"):
+        path = path + ".ini"
+
+    if not os.path.exists(path):
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(DEFAULT_CONFIG)
+        print(f"Created default config at {path}. Please edit api_key before running again.", file=sys.stderr)
+        sys.exit(1)
+
+    cp = configparser.ConfigParser()
+    if not cp.read(path, encoding="utf-8"):
+        raise FileNotFoundError(f"Config file not found or unreadable: {path}")
+
+    # Load configuration with new structure
+    cfg = {
+        # Core settings
+        "lidarr_url": cp.get("lidarr", "base_url", fallback="http://192.168.1.103:8686"),
+        "api_key": cp.get("lidarr", "api_key", fallback=""),
+        "target_base_url": cp.get("probe", "target_base_url", fallback="https://api.lidarr.audio/api/v0.4"),
+        "timeout_seconds": cp.getint("probe", "timeout_seconds", fallback=10),
+        
+        # CSV paths
+        "artists_csv_path": cp.get("ledger", "artists_csv_path", fallback="/data/mbid-artists.csv"),
+        "release_groups_csv_path": cp.get("ledger", "release_groups_csv_path", fallback="/data/mbid-releasegroups.csv"),
+        
+        # Processing control
+        "process_release_groups": parse_bool(cp.get("run", "process_release_groups", fallback="false")),
+        "force_artists": parse_bool(cp.get("run", "force_artists", fallback="false")),
+        "force_rg": parse_bool(cp.get("run", "force_rg", fallback="false")),
+        "update_lidarr": parse_bool(cp.get("actions", "update_lidarr", fallback="false")),
+        
+        # Shared API settings
+        "delay_between_attempts": cp.getfloat("probe", "delay_between_attempts", fallback=0.5),
+        "max_concurrent_requests": cp.getint("probe", "max_concurrent_requests", fallback=5),
+        "rate_limit_per_second": cp.getfloat("probe", "rate_limit_per_second", fallback=3),
+        
+        # Per-entity cache warming settings
+        "max_attempts_per_artist": cp.getint("probe", "max_attempts_per_artist", fallback=25),
+        "max_attempts_per_rg": cp.getint("probe", "max_attempts_per_rg", fallback=15),
+        
+        # Circuit breaker settings
+        "circuit_breaker_threshold": cp.getint("probe", "circuit_breaker_threshold", fallback=25),
+        "backoff_factor": cp.getfloat("probe", "backoff_factor", fallback=0.5),
+        "max_backoff_seconds": cp.getfloat("probe", "max_backoff_seconds", fallback=30),
+        
+        # Processing options
+        "batch_size": cp.getint("run", "batch_size", fallback=25),
+        "batch_write_frequency": cp.getint("run", "batch_write_frequency", fallback=5),
+        
+        # Monitoring options
+        "log_progress_every_n": cp.getint("monitoring", "log_progress_every_n", fallback=25),
+        "log_level": cp.get("monitoring", "log_level", fallback="INFO"),
+    }
+
+    if not cfg["api_key"] or "REPLACE_WITH_YOUR_LIDARR_API_KEY" in cfg["api_key"]:
+        raise ValueError("Missing [lidarr].api_key in config (or still using the placeholder).")
+
+    return cfg
+
+
+def get_lidarr_artists(base_url: str, api_key: str, timeout: int = 30) -> List[Dict]:
+    """Fetch artists from Lidarr and return a list of dicts with {id, name, mbid}."""
+    session = requests.Session()
+    headers = {"X-Api-Key": api_key}
+
+    candidates = [
+        "/api/v1/artist",
+        "/api/artist", 
+        "/api/v3/artist",
+    ]
+
+    last_exc = None
+    for path in candidates:
+        url = f"{base_url.rstrip('/')}{path}"
+        try:
+            r = session.get(url, headers=headers, timeout=timeout)
+            if r.status_code == 404:
+                continue
+            r.raise_for_status()
+            data = r.json()
+            artists = []
+            for a in data:
+                mbid = a.get("foreignArtistId") or a.get("mbId") or a.get("mbid")
+                name = a.get("artistName") or a.get("name") or "Unknown"
+                lidarr_id = a.get("id")
+                if mbid:
+                    artists.append({"id": lidarr_id, "name": name, "mbid": mbid})
+            return artists
+        except Exception as e:
+            last_exc = e
+            continue
+
+    raise RuntimeError(
+        f"Could not fetch artists from Lidarr using known endpoints. Last error: {last_exc}"
+    )
+
+
+def get_lidarr_release_groups(base_url: str, api_key: str, timeout: int = 30) -> List[Dict]:
+    """Fetch release groups from Lidarr and return a list of dicts with album info."""
+    session = requests.Session()
+    headers = {"X-Api-Key": api_key}
+
+    candidates = [
+        "/api/v1/album",
+        "/api/album", 
+        "/api/v3/album",
+    ]
+
+    last_exc = None
+    for path in candidates:
+        url = f"{base_url.rstrip('/')}{path}"
+        try:
+            r = session.get(url, headers=headers, timeout=timeout)
+            if r.status_code == 404:
+                continue
+            r.raise_for_status()
+            data = r.json()
+            release_groups = []
+            for album in data:
+                rg_mbid = album.get("foreignAlbumId") or album.get("mbId") or album.get("mbid")
+                album_title = album.get("title") or "Unknown Album"
+                artist_mbid = album.get("artist", {}).get("foreignArtistId") if album.get("artist") else None
+                artist_name = album.get("artist", {}).get("artistName") if album.get("artist") else "Unknown Artist"
+                
+                if rg_mbid and artist_mbid:
+                    release_groups.append({
+                        "rg_mbid": rg_mbid,
+                        "rg_title": album_title,
+                        "artist_mbid": artist_mbid,
+                        "artist_name": artist_name
+                    })
+            return release_groups
+        except Exception as e:
+            last_exc = e
+            continue
+
+    raise RuntimeError(
+        f"Could not fetch release groups from Lidarr using known endpoints. Last error: {last_exc}"
+    )
+
+
+def read_artists_ledger(csv_path: str) -> Dict[str, Dict]:
+    """Read existing artists CSV into a dict keyed by MBID."""
+    ledger: Dict[str, Dict] = {}
+    if not os.path.exists(csv_path):
+        return ledger
+    
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            mbid = (row.get("mbid") or "").strip()
+            if not mbid:
+                continue
+            ledger[mbid] = {
+                "mbid": mbid,
+                "artist_name": row.get("artist_name", ""),
+                "status": (row.get("status") or "").lower().strip(),
+                "attempts": int((row.get("attempts") or "0") or 0),
+                "last_status_code": row.get("last_status_code", ""),
+                "last_checked": row.get("last_checked", ""),
+            }
+    return ledger
+
+
+def write_artists_ledger(csv_path: str, ledger: Dict[str, Dict]) -> None:
+    """Write the artists ledger dict back to CSV atomically."""
+    os.makedirs(os.path.dirname(csv_path) or ".", exist_ok=True)
+    fieldnames = ["mbid", "artist_name", "status", "attempts", "last_status_code", "last_checked"]
+    tmp_path = csv_path + ".tmp"
+    with open(tmp_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for _, row in sorted(ledger.items(), key=lambda kv: (kv[1].get("artist_name", ""), kv[0])):
+            writer.writerow(row)
+    os.replace(tmp_path, csv_path)
+
+
+def read_release_groups_ledger(csv_path: str) -> Dict[str, Dict]:
+    """Read existing release groups CSV into a dict keyed by RG MBID."""
+    ledger: Dict[str, Dict] = {}
+    if not os.path.exists(csv_path):
+        return ledger
+    
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            rg_mbid = (row.get("rg_mbid") or "").strip()
+            if not rg_mbid:
+                continue
+            ledger[rg_mbid] = {
+                "rg_mbid": rg_mbid,
+                "rg_title": row.get("rg_title", ""),
+                "artist_mbid": row.get("artist_mbid", ""),
+                "artist_name": row.get("artist_name", ""),
+                "artist_cache_status": row.get("artist_cache_status", ""),
+                "status": (row.get("status") or "").lower().strip(),
+                "attempts": int((row.get("attempts") or "0") or 0),
+                "last_status_code": row.get("last_status_code", ""),
+                "last_checked": row.get("last_checked", ""),
+            }
+    return ledger
+
+
+def write_release_groups_ledger(csv_path: str, ledger: Dict[str, Dict]) -> None:
+    """Write the release groups ledger dict back to CSV atomically."""
+    os.makedirs(os.path.dirname(csv_path) or ".", exist_ok=True)
+    fieldnames = ["rg_mbid", "rg_title", "artist_mbid", "artist_name", "artist_cache_status", 
+                  "status", "attempts", "last_status_code", "last_checked"]
+    tmp_path = csv_path + ".tmp"
+    with open(tmp_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for _, row in sorted(ledger.items(), key=lambda kv: (kv[1].get("artist_name", ""), kv[1].get("rg_title", ""), kv[0])):
+            writer.writerow(row)
+    os.replace(tmp_path, csv_path)
+
+
+def update_release_groups_artist_status(rg_ledger: Dict[str, Dict], artists_ledger: Dict[str, Dict]) -> None:
+    """Update artist_cache_status in release groups ledger based on current artist statuses."""
+    for rg_mbid, rg_data in rg_ledger.items():
+        artist_mbid = rg_data.get("artist_mbid", "")
+        if artist_mbid in artists_ledger:
+            rg_data["artist_cache_status"] = artists_ledger[artist_mbid].get("status", "")
+
+
+def trigger_lidarr_refresh(base_url: str, api_key: str, artist_id: Optional[int]) -> None:
+    """Fire-and-forget refresh request to Lidarr for the given artist id."""
+    if artist_id is None:
+        return
+    session = requests.Session()
+    headers = {"X-Api-Key": api_key}
+    payloads = [
+        {"name": "RefreshArtist", "artistIds": [artist_id]},
+        {"name": "RefreshArtist", "artistId": artist_id},
+    ]
+    for path in ("/api/v1/command", "/api/command"):
+        url = f"{base_url.rstrip('/')}{path}"
+        for body in payloads:
+            try:
+                session.post(url, headers=headers, json=body, timeout=0.5)
+                return
+            except Exception:
+                continue
+
+
+def check_api_health(target_base_url: str, timeout: int = 10) -> dict:
+    """Pre-flight check of the target API"""
+    health_info = {
+        "available": False,
+        "response_time_ms": None,
+        "status_code": None,
+        "error": None
+    }
+    
+    try:
+        start_time = time.time()
+        response = requests.get(target_base_url, timeout=timeout)
+        health_info["response_time_ms"] = (time.time() - start_time) * 1000
+        health_info["status_code"] = response.status_code
+        health_info["available"] = response.status_code < 500
+        
+    except Exception as e:
+        health_info["error"] = str(e)
+    
+    return health_info
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Lidarr cache warmer - warm API caches for artists and release groups."
+    )
+    parser.add_argument("--config", required=True, help="Path to INI config (e.g., /data/config.ini)")
+    parser.add_argument("--force-artists", action="store_true",
+                        help="Force re-check all artists (sets max_attempts_per_artist=1)")
+    parser.add_argument("--force-rg", action="store_true",
+                        help="Force re-check all release groups (sets max_attempts_per_rg=1)")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Show what would be done without making API calls")
+    args = parser.parse_args()
+
+    try:
+        cfg = load_config(args.config)
+    except Exception as e:
+        print(f"ERROR loading config: {e}", file=sys.stderr)
+        sys.exit(2)
+
+    # Apply CLI overrides for force modes
+    if args.force_artists:
+        cfg["force_artists"] = True
+        cfg["max_attempts_per_artist"] = 1
+        print("Force artists mode enabled: max_attempts_per_artist set to 1 for quick refresh.")
+    
+    if args.force_rg:
+        cfg["force_rg"] = True
+        cfg["max_attempts_per_rg"] = 1
+        print("Force release groups mode enabled: max_attempts_per_rg set to 1 for quick refresh.")
+
+    # Validate configuration
+    config_issues = validate_config(cfg)
+    if config_issues:
+        print("Configuration issues found:", file=sys.stderr)
+        for issue in config_issues:
+            print(f"  - {issue}", file=sys.stderr)
+        sys.exit(2)
+
+    # Pre-flight API health check
+    print("Performing API health check...")
+    api_health = check_api_health(cfg["target_base_url"])
+    if api_health["available"]:
+        print(f"✅ Target API is healthy (response time: {api_health['response_time_ms']:.1f}ms)")
+    else:
+        print(f"⚠️  Target API health check failed: {api_health.get('error', 'Unknown error')}")
+        if not args.dry_run:
+            print("Continuing anyway, but expect potential issues...")
+
+    # Fetch data from Lidarr
+    try:
+        print("Fetching artists from Lidarr...")
+        artists = get_lidarr_artists(cfg["lidarr_url"], cfg["api_key"])
+        print(f"✅ Found {len(artists)} artists in Lidarr")
+        
+        if cfg["process_release_groups"]:
+            print("Fetching release groups from Lidarr...")
+            release_groups = get_lidarr_release_groups(cfg["lidarr_url"], cfg["api_key"])
+            print(f"✅ Found {len(release_groups)} release groups in Lidarr")
+        else:
+            release_groups = []
+            
+    except Exception as e:
+        print(f"ERROR fetching data from Lidarr: {e}", file=sys.stderr)
+        sys.exit(2)
+
+    # Load existing ledgers
+    artists_ledger = read_artists_ledger(cfg["artists_csv_path"])
+    rg_ledger = read_release_groups_ledger(cfg["release_groups_csv_path"])
+
+    # Update artists ledger with current Lidarr data
+    artists_new_count = 0
+    for artist in artists:
+        mbid = artist["mbid"]
+        name = artist["name"]
+        if mbid not in artists_ledger:
+            artists_ledger[mbid] = {
+                "mbid": mbid,
+                "artist_name": name,
+                "status": "",
+                "attempts": 0,
+                "last_status_code": "",
+                "last_checked": "",
+            }
+            artists_new_count += 1
+        else:
+            # Update name if changed
+            if name and artists_ledger[mbid].get("artist_name") != name:
+                artists_ledger[mbid]["artist_name"] = name
+
+    # Update release groups ledger with current Lidarr data
+    rg_new_count = 0
+    if cfg["process_release_groups"]:
+        for rg in release_groups:
+            rg_mbid = rg["rg_mbid"]
+            if rg_mbid not in rg_ledger:
+                rg_ledger[rg_mbid] = {
+                    "rg_mbid": rg_mbid,
+                    "rg_title": rg["rg_title"],
+                    "artist_mbid": rg["artist_mbid"],
+                    "artist_name": rg["artist_name"],
+                    "artist_cache_status": artists_ledger.get(rg["artist_mbid"], {}).get("status", ""),
+                    "status": "",
+                    "attempts": 0,
+                    "last_status_code": "",
+                    "last_checked": "",
+                }
+                rg_new_count += 1
+            else:
+                # Update fields if changed
+                rg_ledger[rg_mbid]["rg_title"] = rg["rg_title"]
+                rg_ledger[rg_mbid]["artist_name"] = rg["artist_name"]
+                rg_ledger[rg_mbid]["artist_cache_status"] = artists_ledger.get(rg["artist_mbid"], {}).get("status", "")
+
+    # Write updated ledgers
+    write_artists_ledger(cfg["artists_csv_path"], artists_ledger)
+    if cfg["process_release_groups"]:
+        write_release_groups_ledger(cfg["release_groups_csv_path"], rg_ledger)
+
+    print(f"Updated artists ledger: {len(artists)} total ({artists_new_count} new)")
+    if cfg["process_release_groups"]:
+        print(f"Updated release groups ledger: {len(rg_ledger)} total ({rg_new_count} new)")
+
+    if args.dry_run:
+        print("\n🧪 DRY RUN MODE - No API calls will be made")
+        
+        # Show what artists would be processed
+        artists_to_check = [mbid for mbid, row in artists_ledger.items() 
+                           if cfg["force_artists"] or row.get("status", "").lower() not in ("success",)]
+        print(f"Would process {len(artists_to_check)} artists")
+        
+        if cfg["process_release_groups"]:
+            rgs_to_check = [rg_mbid for rg_mbid, row in rg_ledger.items()
+                           if row.get("artist_cache_status", "").lower() == "success" and 
+                              (cfg["force_rg"] or row.get("status", "").lower() not in ("success",))]
+            print(f"Would process {len(rgs_to_check)} release groups")
+        return
+
+    # Phase 1: Process Artists
+    print(f"\n=== Phase 1: Processing Artists ===")
+    
+    # Import and run artist processing
+    try:
+        from process_artists import process_artists
+        artists_to_check = [mbid for mbid, row in artists_ledger.items() 
+                           if cfg["force_artists"] or row.get("status", "").lower() not in ("success",)]
+        
+        if len(artists_to_check) > 0:
+            print(f"Will process {len(artists_to_check)} artists")
+            artist_results = process_artists(artists_to_check, artists_ledger, cfg)
+            print(f"Artists phase complete: {artist_results}")
+        else:
+            print("No artists to process - all already successful")
+            artist_results = {"transitioned": 0, "new_successes": 0, "new_failures": 0}
+            
+    except ImportError:
+        print("ERROR: process_artists.py not found", file=sys.stderr)
+        sys.exit(2)
+    except Exception as e:
+        print(f"ERROR in artist processing: {e}", file=sys.stderr)
+        sys.exit(2)
+
+    # Phase 2: Process Release Groups (if enabled)
+    if cfg["process_release_groups"]:
+        print(f"\n=== Phase 2: Processing Release Groups ===")
+        
+        # Re-read artists ledger to get updated statuses, then update RG artist statuses
+        artists_ledger = read_artists_ledger(cfg["artists_csv_path"])
+        update_release_groups_artist_status(rg_ledger, artists_ledger)
+        write_release_groups_ledger(cfg["release_groups_csv_path"], rg_ledger)
+        
+        try:
+            from process_releasegroups import process_release_groups
+            
+            # Filter RGs: only process those with successful artist cache AND pending RG status
+            rgs_to_check = [rg_mbid for rg_mbid, row in rg_ledger.items()
+                           if row.get("artist_cache_status", "").lower() == "success" and 
+                              (cfg["force_rg"] or row.get("status", "").lower() not in ("success",))]
+            
+            if len(rgs_to_check) > 0:
+                print(f"Will process {len(rgs_to_check)} release groups (from successfully cached artists)")
+                rg_results = process_release_groups(rgs_to_check, rg_ledger, cfg)
+                print(f"Release groups phase complete: {rg_results}")
+            else:
+                print("No release groups to process")
+                rg_results = {"transitioned": 0, "new_successes": 0, "new_failures": 0}
+                
+        except ImportError:
+            print("ERROR: process_releasegroups.py not found", file=sys.stderr)
+            sys.exit(2)
+        except Exception as e:
+            print(f"ERROR in release group processing: {e}", file=sys.stderr)
+            sys.exit(2)
+    else:
+        print("Release group processing disabled in config")
+        rg_results = {"transitioned": 0, "new_successes": 0, "new_failures": 0}
+
+    # Final summary
+    print(f"\n=== Final Summary ===")
+    print(f"Artists: {artist_results}")
+    if cfg["process_release_groups"]:
+        print(f"Release Groups: {rg_results}")
+    
+    # Write simple results log
+    try:
+        os.makedirs("/data", exist_ok=True)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        log_path = f"/data/results_{ts}.log"
+        
+        # Calculate final stats
+        total_artist_successes = sum(1 for r in artists_ledger.values() if r.get("status") == "success")
+        total_artist_timeouts = sum(1 for r in artists_ledger.values() if r.get("status") == "timeout")
+        
+        if cfg["process_release_groups"]:
+            total_rg_successes = sum(1 for r in rg_ledger.values() if r.get("status") == "success")
+            total_rg_timeouts = sum(1 for r in rg_ledger.values() if r.get("status") == "timeout")
+        else:
+            total_rg_successes = 0
+            total_rg_timeouts = 0
+        
+        with open(log_path, "w", encoding="utf-8") as lf:
+            lf.write(f"finished_at_utc={iso_now()}\n")
+            lf.write(f"artists_success={total_artist_successes}\n")
+            lf.write(f"artists_timeout={total_artist_timeouts}\n")
+            lf.write(f"artists_total={len(artists_ledger)}\n")
+            lf.write(f"rg_success={total_rg_successes}\n")
+            lf.write(f"rg_timeout={total_rg_timeouts}\n")
+            lf.write(f"rg_total={len(rg_ledger)}\n")
+            lf.write(f"force_artists={'true' if cfg['force_artists'] else 'false'}\n")
+            lf.write(f"force_rg={'true' if cfg['force_rg'] else 'false'}\n")
+            lf.write(f"process_release_groups={'true' if cfg['process_release_groups'] else 'false'}\n")
+            lf.write(f"lidarr_refreshes_triggered={artist_results.get('transitioned', 0)}\n")
+            
+        print(f"Results log written to: {log_path}")
+    except Exception as e:
+        print(f"WARNING: Failed to write results log: {e}", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()
