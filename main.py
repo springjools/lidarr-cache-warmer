@@ -392,6 +392,20 @@ def main():
         print(f"ERROR loading config: {e}", file=sys.stderr)
         sys.exit(2)
 
+    # Check if this is a first run (no existing CSV files)
+    is_first_run = not os.path.exists(cfg["artists_csv_path"])
+    if cfg["process_release_groups"]:
+        is_first_run = is_first_run or not os.path.exists(cfg["release_groups_csv_path"])
+    
+    if is_first_run:
+        print("🔍 First run detected - no existing CSV files found")
+        print("   Enabling force modes for initial cache discovery (1 attempt per entity)")
+        cfg["force_artists"] = True
+        cfg["max_attempts_per_artist"] = 1
+        if cfg["process_release_groups"]:
+            cfg["force_rg"] = True  
+            cfg["max_attempts_per_rg"] = 1
+
     # Apply CLI overrides for force modes
     if args.force_artists:
         cfg["force_artists"] = True
@@ -404,7 +418,7 @@ def main():
         print("Force release groups mode enabled: max_attempts_per_rg set to 1 for quick refresh.")
 
     # Apply config file force modes (should also set attempts to 1)
-    if cfg.get("force_artists", False) and not args.force_artists:
+    elif cfg.get("force_artists", False):
         cfg["max_attempts_per_artist"] = 1
         print("Force artists mode enabled from config: max_attempts_per_artist set to 1 for quick refresh.")
         
