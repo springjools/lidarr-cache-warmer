@@ -13,12 +13,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application files
 COPY entrypoint.py .
 COPY main.py .
+COPY config.py .
 COPY storage.py .
 COPY stats.py .
 COPY process_artists.py .
+COPY process_artist_textsearch.py .
 COPY process_releasegroups.py .
 
-# Work directory for mounted data (config.ini + CSV files)
+# Work directory for mounted data (config.ini + CSV files/SQLite DB)
 WORKDIR /data
 
 # Optional: allow overriding the config path at runtime

@@ -7,67 +7,8 @@ import sys
 import time
 from datetime import datetime
 
-DEFAULT_CONFIG = '''# config.ini
-# Generated automatically on first run. Edit and set your Lidarr API key.
+from config import DEFAULT_CONFIG
 
-[lidarr]
-# Default Lidarr URL
-base_url = http://192.168.1.103:8686
-api_key  = REPLACE_WITH_YOUR_LIDARR_API_KEY
-
-[probe]
-# API to probe for each MBID
-target_base_url = https://api.lidarr.audio/api/v0.4
-timeout_seconds = 10
-
-# Shared API settings
-delay_between_attempts = 0.5
-max_concurrent_requests = 5
-rate_limit_per_second = 3
-
-# Per-entity cache warming settings
-max_attempts_per_artist = 25
-max_attempts_per_rg = 15
-
-# Circuit breaker settings
-circuit_breaker_threshold = 25
-backoff_factor = 0.5
-max_backoff_seconds = 30
-
-[ledger]
-# Storage backend: csv (default) or sqlite
-storage_type = csv
-
-# CSV file paths (used when storage_type = csv)
-artists_csv_path = /data/mbid-artists.csv
-release_groups_csv_path = /data/mbid-releasegroups.csv
-
-# SQLite database path (used when storage_type = sqlite)
-db_path = /data/mbid_cache.db
-
-[run]
-# Processing control
-process_release_groups = false
-force_artists = false
-force_rg = false
-batch_size = 25
-batch_write_frequency = 5
-
-[actions]
-# If true, when a probe transitions from (no status or timeout) -> success,
-# trigger a non-blocking refresh of that artist in Lidarr.
-update_lidarr = false
-
-[schedule]
-# Run every N seconds (>=1). Example: 3600 = hourly
-interval_seconds = 3600
-run_at_start = true
-max_runs = 50
-
-[monitoring]
-log_progress_every_n = 25
-log_level = INFO
-'''
 
 STOP = False
 
@@ -149,6 +90,8 @@ def main():
             extra.append("--force-artists")
         if os.environ.get("FORCE_RG", "false").lower() in ("1", "true", "yes", "on"):
             extra.append("--force-rg")
+        if os.environ.get("FORCE_TEXT_SEARCH", "false").lower() in ("1", "true", "yes", "on"):
+            extra.append("--force-text-search")
 
         proc = subprocess.run(
             ["python", "/app/main.py", "--config", config_path] + extra,
