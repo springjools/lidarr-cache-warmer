@@ -30,7 +30,11 @@ rate_limit_per_second = 3
 
 # Per-entity cache warming settings
 max_attempts_per_artist = 25
+max_attempts_per_artist_textsearch = 25
 max_attempts_per_rg = 15
+
+# Text search cache warming (warms search-by-name cache)
+# enable_text_search_warming = true  # REMOVED - use process_artist_textsearch instead
 
 # Circuit breaker settings
 circuit_breaker_threshold = 25
@@ -49,10 +53,12 @@ release_groups_csv_path = /data/mbid-releasegroups.csv
 db_path = /data/mbid_cache.db
 
 [run]
-# Processing control
+# Processing control - enable/disable each phase
 process_release_groups = false
+process_artist_textsearch = true
 force_artists = false
 force_rg = false
+force_text_search = false
 batch_size = 25
 batch_write_frequency = 5
 
@@ -137,8 +143,10 @@ def load_config(path: str) -> dict:
         
         # Processing control
         "process_release_groups": parse_bool(cp.get("run", "process_release_groups", fallback="false")),
+        "process_artist_textsearch": parse_bool(cp.get("run", "process_artist_textsearch", fallback="true")),
         "force_artists": parse_bool(cp.get("run", "force_artists", fallback="false")),
         "force_rg": parse_bool(cp.get("run", "force_rg", fallback="false")),
+        "force_text_search": parse_bool(cp.get("run", "force_text_search", fallback="false")),
         "update_lidarr": parse_bool(cp.get("actions", "update_lidarr", fallback="false")),
         
         # Shared API settings
@@ -148,6 +156,7 @@ def load_config(path: str) -> dict:
         
         # Per-entity cache warming settings
         "max_attempts_per_artist": cp.getint("probe", "max_attempts_per_artist", fallback=25),
+        "max_attempts_per_artist_textsearch": cp.getint("probe", "max_attempts_per_artist_textsearch", fallback=25),
         "max_attempts_per_rg": cp.getint("probe", "max_attempts_per_rg", fallback=15),
         
         # Circuit breaker settings
@@ -302,6 +311,8 @@ def main():
                         help="Force re-check all artists (sets max_attempts_per_artist=1)")
     parser.add_argument("--force-rg", action="store_true",
                         help="Force re-check all release groups (sets max_attempts_per_rg=1)")
+    parser.add_argument("--force-text-search", action="store_true",
+                        help="Force re-check all text searches for artists")
     parser.add_argument("--dry-run", action="store_true",
                         help="Show what would be done without making API calls")
     args = parser.parse_args()
@@ -324,6 +335,8 @@ def main():
         if cfg["process_release_groups"]:
             cfg["force_rg"] = True  
             cfg["max_attempts_per_rg"] = 1
+        # Don't force text search on first run - let MBID cache build first
+        cfg["process_artist_textsearch"] = False
 
     # Apply CLI overrides for force modes
     if args.force_artists:
@@ -335,6 +348,10 @@ def main():
         cfg["force_rg"] = True
         cfg["max_attempts_per_rg"] = 1
         print("Force release groups mode enabled: max_attempts_per_rg set to 1 for quick refresh.")
+
+    if args.force_text_search:
+        cfg["force_text_search"] = True
+        print("Force text search mode enabled: will re-check all text searches.")
 
     # Apply config file force modes (should also set attempts to 1)
     elif cfg.get("force_artists", False):
@@ -397,12 +414,22 @@ def main():
                 "attempts": 0,
                 "last_status_code": "",
                 "last_checked": "",
+                # New text search fields
+                "text_search_attempted": False,
+                "text_search_success": False,
+                "text_search_last_checked": "",
             }
             artists_new_count += 1
         else:
             # Update name if changed
             if name and artists_ledger[mbid].get("artist_name") != name:
                 artists_ledger[mbid]["artist_name"] = name
+            
+            # Add text search fields if missing (for existing records)
+            if "text_search_attempted" not in artists_ledger[mbid]:
+                artists_ledger[mbid]["text_search_attempted"] = False
+                artists_ledger[mbid]["text_search_success"] = False
+                artists_ledger[mbid]["text_search_last_checked"] = ""
 
     # Update release groups ledger with current Lidarr data
     rg_new_count = 0
@@ -443,7 +470,13 @@ def main():
         # Show what artists would be processed
         artists_to_check = [mbid for mbid, row in artists_ledger.items() 
                            if cfg["force_artists"] or row.get("status", "").lower() not in ("success",)]
-        print(f"Would process {len(artists_to_check)} artists")
+        print(f"Would process {len(artists_to_check)} artists for MBID warming")
+        
+        # Show text search candidates
+        if cfg["process_artist_textsearch"]:
+            text_search_to_check = [mbid for mbid, row in artists_ledger.items()
+                                   if cfg["force_text_search"] or not row.get("text_search_attempted", False)]
+            print(f"Would process {len(text_search_to_check)} artists for text search warming")
         
         if cfg["process_release_groups"]:
             rgs_to_check = [rg_mbid for rg_mbid, row in rg_ledger.items()
@@ -452,8 +485,8 @@ def main():
             print(f"Would process {len(rgs_to_check)} release groups")
         return
 
-    # Phase 1: Process Artists
-    print(f"\n=== Phase 1: Processing Artists ===")
+    # Phase 1: Process Artists (MBID Cache Warming)
+    print(f"\n=== Phase 1: Artist MBID Cache Warming ===")
     
     # Import and run artist processing
     try:
@@ -462,23 +495,56 @@ def main():
                            if cfg["force_artists"] or row.get("status", "").lower() not in ("success",)]
         
         if len(artists_to_check) > 0:
-            print(f"Will process {len(artists_to_check)} artists")
+            print(f"Will process {len(artists_to_check)} artists for MBID cache warming")
             artist_results = process_artists(artists_to_check, artists_ledger, cfg, storage)
-            print(f"Artists phase complete: {artist_results}")
+            print(f"Artist MBID warming complete: {artist_results}")
         else:
-            print("No artists to process - all already successful")
+            print("No artists to process for MBID warming - all already successful")
             artist_results = {"transitioned": 0, "new_successes": 0, "new_failures": 0}
             
     except ImportError:
         print("ERROR: process_artists.py not found", file=sys.stderr)
         sys.exit(2)
     except Exception as e:
-        print(f"ERROR in artist processing: {e}", file=sys.stderr)
+        print(f"ERROR in artist MBID processing: {e}", file=sys.stderr)
         sys.exit(2)
 
-    # Phase 2: Process Release Groups (if enabled)
+    # Phase 2: Process Text Search Cache Warming (if enabled)
+    if cfg["process_artist_textsearch"]:
+        print(f"\n=== Phase 2: Artist Text Search Cache Warming ===")
+        
+        # Re-read artists ledger to get updated statuses from Phase 1
+        artists_ledger = storage.read_artists_ledger()
+        
+        try:
+            from process_artist_textsearch import process_text_search
+            
+            # Only do text search for artists that have names and meet criteria
+            text_search_to_check = [mbid for mbid, row in artists_ledger.items()
+                                   if row.get("artist_name", "").strip() and
+                                      (cfg["force_text_search"] or not row.get("text_search_attempted", False))]
+            
+            if len(text_search_to_check) > 0:
+                print(f"Will process {len(text_search_to_check)} artists for text search cache warming")
+                text_search_results = process_text_search(text_search_to_check, artists_ledger, cfg, storage)
+                print(f"Text search warming complete: {text_search_results}")
+            else:
+                print("No artists to process for text search warming")
+                text_search_results = {"new_successes": 0, "new_failures": 0}
+                
+        except ImportError:
+            print("ERROR: process_artist_textsearch.py not found", file=sys.stderr)
+            sys.exit(2)
+        except Exception as e:
+            print(f"ERROR in text search processing: {e}", file=sys.stderr)
+            sys.exit(2)
+    else:
+        print("Artist text search processing disabled in config")
+        text_search_results = {"new_successes": 0, "new_failures": 0}
+
+    # Phase 3: Process Release Groups (if enabled)
     if cfg["process_release_groups"]:
-        print(f"\n=== Phase 2: Processing Release Groups ===")
+        print(f"\n=== Phase 3: Release Group Cache Warming ===")
         
         # Re-read artists ledger to get updated statuses, then update RG artist statuses
         artists_ledger = storage.read_artists_ledger()
@@ -522,7 +588,9 @@ def main():
 
     # Final summary
     print(f"\n=== Final Summary ===")
-    print(f"Artists: {artist_results}")
+    print(f"Artist MBID Warming: {artist_results}")
+    if cfg["process_artist_textsearch"]:
+        print(f"Text Search Warming: {text_search_results}")
     if cfg["process_release_groups"]:
         print(f"Release Groups: {rg_results}")
     
@@ -535,6 +603,8 @@ def main():
         # Calculate final stats
         total_artist_successes = sum(1 for r in artists_ledger.values() if r.get("status") == "success")
         total_artist_timeouts = sum(1 for r in artists_ledger.values() if r.get("status") == "timeout")
+        total_text_search_attempted = sum(1 for r in artists_ledger.values() if r.get("text_search_attempted", False))
+        total_text_search_successes = sum(1 for r in artists_ledger.values() if r.get("text_search_success", False))
         
         if cfg["process_release_groups"]:
             total_rg_successes = sum(1 for r in rg_ledger.values() if r.get("status") == "success")
@@ -548,12 +618,16 @@ def main():
             lf.write(f"artists_success={total_artist_successes}\n")
             lf.write(f"artists_timeout={total_artist_timeouts}\n")
             lf.write(f"artists_total={len(artists_ledger)}\n")
+            lf.write(f"text_search_attempted={total_text_search_attempted}\n")
+            lf.write(f"text_search_success={total_text_search_successes}\n")
             lf.write(f"rg_success={total_rg_successes}\n")
             lf.write(f"rg_timeout={total_rg_timeouts}\n")
             lf.write(f"rg_total={len(rg_ledger)}\n")
             lf.write(f"force_artists={'true' if cfg['force_artists'] else 'false'}\n")
             lf.write(f"force_rg={'true' if cfg['force_rg'] else 'false'}\n")
+            lf.write(f"force_text_search={'true' if cfg['force_text_search'] else 'false'}\n")
             lf.write(f"process_release_groups={'true' if cfg['process_release_groups'] else 'false'}\n")
+            lf.write(f"process_artist_textsearch={'true' if cfg['process_artist_textsearch'] else 'false'}\n")
             lf.write(f"lidarr_refreshes_triggered={artist_results.get('transitioned', 0)}\n")
             
         print(f"Results log written to: {log_path}")

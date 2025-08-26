@@ -67,13 +67,18 @@ class CSVStorage(StorageBackend):
                     "attempts": int((row.get("attempts") or "0") or 0),
                     "last_status_code": row.get("last_status_code", ""),
                     "last_checked": row.get("last_checked", ""),
+                    # Text search fields (with backwards compatibility)
+                    "text_search_attempted": row.get("text_search_attempted", "").lower() in ("true", "1"),
+                    "text_search_success": row.get("text_search_success", "").lower() in ("true", "1"),
+                    "text_search_last_checked": row.get("text_search_last_checked", ""),
                 }
         return ledger
 
     def write_artists_ledger(self, ledger: Dict[str, Dict]) -> None:
         """Write the artists ledger dict back to CSV atomically."""
         os.makedirs(os.path.dirname(self.artists_csv_path) or ".", exist_ok=True)
-        fieldnames = ["mbid", "artist_name", "status", "attempts", "last_status_code", "last_checked"]
+        fieldnames = ["mbid", "artist_name", "status", "attempts", "last_status_code", "last_checked",
+                      "text_search_attempted", "text_search_success", "text_search_last_checked"]
         tmp_path = self.artists_csv_path + ".tmp"
         with open(tmp_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -144,7 +149,10 @@ class SQLiteStorage(StorageBackend):
                     status TEXT NOT NULL DEFAULT '',
                     attempts INTEGER NOT NULL DEFAULT 0,
                     last_status_code TEXT NOT NULL DEFAULT '',
-                    last_checked TEXT NOT NULL DEFAULT ''
+                    last_checked TEXT NOT NULL DEFAULT '',
+                    text_search_attempted INTEGER NOT NULL DEFAULT 0,
+                    text_search_success INTEGER NOT NULL DEFAULT 0,
+                    text_search_last_checked TEXT NOT NULL DEFAULT ''
                 )
             """)
             
@@ -165,6 +173,7 @@ class SQLiteStorage(StorageBackend):
             
             # Create indexes for performance
             conn.execute("CREATE INDEX IF NOT EXISTS idx_artists_status ON artists (status)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_artists_text_search ON artists (text_search_attempted, text_search_success)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_rg_status ON release_groups (status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_rg_artist_status ON release_groups (artist_cache_status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_rg_artist_mbid ON release_groups (artist_mbid)")
@@ -178,7 +187,8 @@ class SQLiteStorage(StorageBackend):
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("""
-                SELECT mbid, artist_name, status, attempts, last_status_code, last_checked
+                SELECT mbid, artist_name, status, attempts, last_status_code, last_checked,
+                       text_search_attempted, text_search_success, text_search_last_checked
                 FROM artists
                 ORDER BY artist_name, mbid
             """)
@@ -191,6 +201,9 @@ class SQLiteStorage(StorageBackend):
                     "attempts": row["attempts"],
                     "last_status_code": row["last_status_code"],
                     "last_checked": row["last_checked"],
+                    "text_search_attempted": bool(row["text_search_attempted"]),
+                    "text_search_success": bool(row["text_search_success"]),
+                    "text_search_last_checked": row["text_search_last_checked"],
                 }
         
         return ledger
@@ -201,15 +214,19 @@ class SQLiteStorage(StorageBackend):
             for mbid, data in ledger.items():
                 conn.execute("""
                     INSERT OR REPLACE INTO artists 
-                    (mbid, artist_name, status, attempts, last_status_code, last_checked)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    (mbid, artist_name, status, attempts, last_status_code, last_checked,
+                     text_search_attempted, text_search_success, text_search_last_checked)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     data["mbid"],
                     data["artist_name"],
                     data["status"],
                     data["attempts"],
                     data["last_status_code"],
-                    data["last_checked"]
+                    data["last_checked"],
+                    int(data.get("text_search_attempted", False)),
+                    int(data.get("text_search_success", False)),
+                    data.get("text_search_last_checked", "")
                 ))
             conn.commit()
 

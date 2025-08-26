@@ -27,6 +27,7 @@ rate_limit_per_second = 3
 
 # Per-entity cache warming settings
 max_attempts_per_artist = 25
+max_attempts_per_artist_textsearch = 25
 max_attempts_per_rg = 15
 
 # Circuit breaker settings
@@ -48,8 +49,10 @@ db_path = /data/mbid_cache.db
 [run]
 # Processing control
 process_release_groups = false
+process_artist_textsearch = true
 force_artists = false
 force_rg = false
+force_text_search = false
 batch_size = 25
 batch_write_frequency = 5
 
@@ -149,6 +152,8 @@ def main():
             extra.append("--force-artists")
         if os.environ.get("FORCE_RG", "false").lower() in ("1", "true", "yes", "on"):
             extra.append("--force-rg")
+        if os.environ.get("FORCE_TEXT_SEARCH", "false").lower() in ("1", "true", "yes", "on"):
+            extra.append("--force-text-search")
 
         proc = subprocess.run(
             ["python", "/app/main.py", "--config", config_path] + extra,

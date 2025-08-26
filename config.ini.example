@@ -1,5 +1,5 @@
 # /data/config.ini
-# Configuration for lidarr-cache-warmer with dual-phase processing
+# Configuration for lidarr-cache-warmer with dual-phase processing + text search
 
 [lidarr]
 # Set to your Lidarr instance URL and API key
@@ -11,13 +11,13 @@ api_key  = REPLACE_WITH_YOUR_LIDARR_API_KEY
 target_base_url = https://api.lidarr.audio/api/v0.4
 timeout_seconds = 10
 
-# Shared API settings (applies to both artists and release groups)
+# Shared API settings (applies to all phases)
 delay_between_attempts = 0.5
 max_concurrent_requests = 5
 rate_limit_per_second = 3
 
 # Per-entity cache warming settings
-# Try each artist up to 25 times to warm cache
+# Try each artist up to 25 times to warm MBID cache
 max_attempts_per_artist = 25
 # Try each release group up to 15 times to warm cache  
 max_attempts_per_rg = 15
@@ -25,13 +25,14 @@ max_attempts_per_rg = 15
 # Circuit breaker settings (stops run if API is completely broken)
 # Stop after this many entities fail completely in a row
 circuit_breaker_threshold = 25
-# How aggressively to back off on errors (0.5 = less aggressive than before)
+# How aggressively to back off on errors (0.5 = moderate)
 backoff_factor = 0.5
 # Maximum wait time before retrying (reduced from 60 to 30 seconds)
 max_backoff_seconds = 30
 
 [ledger]
 # Storage backend: "csv" (default) or "sqlite"
+# SQLite recommended for libraries with >1000 artists
 storage_type = csv
 
 # CSV file paths (used when storage_type = csv)
@@ -42,14 +43,19 @@ release_groups_csv_path = /data/mbid-releasegroups.csv
 db_path = /data/mbid_cache.db
 
 [run]
-# Processing control
-# Enable release group processing (Phase 2)
+# Processing control - enable/disable each phase
+# Phase 1: Artist MBID cache warming (always enabled)
+# Phase 2: Artist text search cache warming (warms search-by-name cache)
+process_artist_textsearch = true
+
+# Phase 3: Release group MBID cache warming  
 process_release_groups = false
 
 # Force modes (re-check already successful entries)
 # When true, sets max attempts to 1 for quick refresh
 force_artists = false
 force_rg = false
+force_text_search = false
 
 # Processing options (frequent saves for safety)
 # Process in batches of 25 entities
@@ -68,8 +74,8 @@ run_at_start = true
 # Optional: randomize pre-run delay each time, 0 to N seconds
 jitter_seconds = 0
 
-# Stop after a certain number of runs (0 = unlimited, 10 = default)
-max_runs = 10
+# Stop after a certain number of runs (0 = unlimited, 50 = default)
+max_runs = 50
 
 [actions]
 # Integration settings
