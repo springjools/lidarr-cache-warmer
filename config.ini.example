@@ -12,9 +12,9 @@ target_base_url = https://api.lidarr.audio/api/v0.4
 timeout_seconds = 10
 
 # Shared API settings (applies to all phases)
-delay_between_attempts = 0.5
-max_concurrent_requests = 5
-rate_limit_per_second = 3
+delay_between_attempts = 0.25
+max_concurrent_requests = 10
+rate_limit_per_second = 5
 
 # Per-entity cache warming settings
 # Try each artist up to 25 times to warm MBID cache
@@ -24,11 +24,11 @@ max_attempts_per_rg = 15
 
 # Circuit breaker settings (stops run if API is completely broken)
 # Stop after this many entities fail completely in a row
-circuit_breaker_threshold = 25
+circuit_breaker_threshold = 50
 # How aggressively to back off on errors (0.5 = moderate)
 backoff_factor = 0.5
-# Maximum wait time before retrying (reduced from 60 to 30 seconds)
-max_backoff_seconds = 30
+# Maximum wait time before retrying (reduced for faster recovery)
+max_backoff_seconds = 15
 
 [ledger]
 # Storage backend: "csv" (default) or "sqlite"
@@ -74,8 +74,8 @@ run_at_start = true
 # Optional: randomize pre-run delay each time, 0 to N seconds
 jitter_seconds = 0
 
-# Stop after a certain number of runs (0 = unlimited, 50 = default)
-max_runs = 50
+# Stop after a certain number of runs (0 = unlimited, 25 = default)
+max_runs = 25
 
 [actions]
 # Integration settings

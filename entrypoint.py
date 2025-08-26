@@ -21,9 +21,9 @@ target_base_url = https://api.lidarr.audio/api/v0.4
 timeout_seconds = 10
 
 # Shared API settings
-delay_between_attempts = 0.5
-max_concurrent_requests = 5
-rate_limit_per_second = 3
+delay_between_attempts = 0.25
+max_concurrent_requests = 10
+rate_limit_per_second = 5
 
 # Per-entity cache warming settings
 max_attempts_per_artist = 25
@@ -31,9 +31,9 @@ max_attempts_per_artist_textsearch = 25
 max_attempts_per_rg = 15
 
 # Circuit breaker settings
-circuit_breaker_threshold = 25
+circuit_breaker_threshold = 50
 backoff_factor = 0.5
-max_backoff_seconds = 30
+max_backoff_seconds = 15
 
 [ledger]
 # Storage backend: csv (default) or sqlite
@@ -65,7 +65,7 @@ update_lidarr = false
 # Run every N seconds (>=1). Example: 3600 = hourly
 interval_seconds = 3600
 run_at_start = true
-max_runs = 50
+max_runs = 25
 
 [monitoring]
 log_progress_every_n = 25
