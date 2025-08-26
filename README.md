@@ -85,11 +85,36 @@ max_runs = 50                   # Stop after 50 scheduled runs
 
 ### Key Settings
 
-- **`max_attempts_per_artist`**: How many times to retry each artist (default: 25)
-- **`max_attempts_per_rg`**: How many times to retry each release group (default: 15)
-- **`process_release_groups`**: Enable release group processing after artists complete
-- **`rate_limit_per_second`**: API safety valve (default: 3 req/sec)
-- **`update_lidarr`**: Set to `true` to refresh Lidarr when cache warming succeeds
+| Parameter | Purpose | Default | Notes |
+|-----------|---------|---------|--------|
+| **Cache Warming** |
+| `max_attempts_per_artist` | Retry limit for artists | `25` | Higher = more persistent cache warming |
+| `max_attempts_per_rg` | Retry limit for release groups | `15` | Lower since RGs depend on cached artists |
+| `delay_between_attempts` | Wait between retries (seconds) | `0.5` | Prevents overwhelming API |
+| **API Politeness** |
+| `max_concurrent_requests` | Simultaneous requests | `5` | Higher = faster, but more API load |
+| `rate_limit_per_second` | Max API calls per second | `3` | **Primary safety valve** |
+| `circuit_breaker_threshold` | Stop after N consecutive failures | `25` | Protects against broken APIs |
+| **Processing Control** |
+| `process_release_groups` | Enable dual-phase processing | `false` | Set `true` for artists + albums |
+| `force_artists` | Quick refresh all artists | `false` | Sets attempts to 1 for discovery |
+| `force_rg` | Quick refresh all release groups | `false` | Sets attempts to 1 for discovery |
+| **Storage Backend** |
+| `storage_type` | Storage method | `csv` | `csv` or `sqlite` |
+| `db_path` | SQLite database location | `/data/mbid_cache.db` | Used when `storage_type = sqlite` |
+| **Performance** |
+| `batch_size` | Entities per batch | `25` | Memory vs. progress granularity |
+| `batch_write_frequency` | Save progress every N requests | `5` | Higher = less I/O, lower = safer |
+
+### Storage Recommendations
+
+| Library Size | Recommended Storage | Why |
+|--------------|-------------------|-----|
+| < 1,000 artists | `storage_type = csv` | Simple, human-readable files |
+| > 1,000 artists | `storage_type = sqlite` | **Much faster**, indexed queries, atomic updates |
+| > 10,000 release groups | `storage_type = sqlite` | **Essential** for reasonable performance |
+
+**SQLite Benefits:** 30MB+ CSV becomes ~1MB database, 100x faster updates, no file corruption risk.
 
 ---
 
@@ -136,6 +161,40 @@ Progress: 50/250 (20.0%) - Rate: 4.2 artists/sec - ETC: 14:32 - API: 3.00 req/se
 
 ---
 
+## 📊 Statistics & Monitoring
+
+### View Current Stats
+```bash
+# Get comprehensive overview
+python stats.py --config /data/config.ini
+
+# Docker version  
+docker run --rm -v $(pwd)/data:/data ghcr.io/devianteng/lidarr-cache-warmer:latest python /app/stats.py --config /data/config.ini
+```
+
+**Example Output:**
+```
+🎵 LIDARR CACHE WARMER - STATISTICS REPORT
+📋 Key Configuration Settings:
+   • max_concurrent_requests: 5, rate_limit_per_second: 3
+   • storage_type: sqlite, db_path: /data/mbid_cache.db
+
+🎤 ARTIST STATISTICS:
+   ✅ Successfully cached: 1,156 (94.2%)
+   ❌ Failed/Timeout: 71 (5.8%)
+   ⏳ Not yet processed: 0
+
+💿 RELEASE GROUP STATISTICS:  
+   ✅ Successfully cached: 8,247 (67.1%)
+   🎯 Eligible for processing: 12,089 (98.4% coverage)
+
+🚀 RECOMMENDATIONS:
+   • Process 3,842 eligible release groups
+   • Switch to SQLite for better performance
+```
+
+---
+
 ## 🐍 Manual Python Installation
 
 ```bash
@@ -154,6 +213,9 @@ python main.py --config config.ini
 
 # Or run on schedule:
 python entrypoint.py
+
+# View statistics:
+python stats.py --config config.ini
 ```
 
 ### CLI Options

@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY entrypoint.py .
 COPY main.py .
 COPY storage.py .
+COPY stats.py .
 COPY process_artists.py .
 COPY process_releasegroups.py .
 
