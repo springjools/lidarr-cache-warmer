@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import argparse
 import configparser
-import csv
 import os
 import sys
 import time
@@ -9,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 import requests
+from storage import create_storage_backend
 
 DEFAULT_CONFIG = '''# config.ini
 # Generated automatically on first run. Edit and set your Lidarr API key.
@@ -127,9 +127,11 @@ def load_config(path: str) -> dict:
         "target_base_url": cp.get("probe", "target_base_url", fallback="https://api.lidarr.audio/api/v0.4"),
         "timeout_seconds": cp.getint("probe", "timeout_seconds", fallback=10),
         
-        # CSV paths
+        # Storage settings
+        "storage_type": cp.get("ledger", "storage_type", fallback="csv"),
         "artists_csv_path": cp.get("ledger", "artists_csv_path", fallback="/data/mbid-artists.csv"),
         "release_groups_csv_path": cp.get("ledger", "release_groups_csv_path", fallback="/data/mbid-releasegroups.csv"),
+        "db_path": cp.get("ledger", "db_path", fallback="/data/mbid_cache.db"),
         
         # Processing control
         "process_release_groups": parse_bool(cp.get("run", "process_release_groups", fallback="false")),
@@ -247,84 +249,7 @@ def get_lidarr_release_groups(base_url: str, api_key: str, timeout: int = 30) ->
     )
 
 
-def read_artists_ledger(csv_path: str) -> Dict[str, Dict]:
-    """Read existing artists CSV into a dict keyed by MBID."""
-    ledger: Dict[str, Dict] = {}
-    if not os.path.exists(csv_path):
-        return ledger
-    
-    with open(csv_path, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            mbid = (row.get("mbid") or "").strip()
-            if not mbid:
-                continue
-            ledger[mbid] = {
-                "mbid": mbid,
-                "artist_name": row.get("artist_name", ""),
-                "status": (row.get("status") or "").lower().strip(),
-                "attempts": int((row.get("attempts") or "0") or 0),
-                "last_status_code": row.get("last_status_code", ""),
-                "last_checked": row.get("last_checked", ""),
-            }
-    return ledger
-
-
-def write_artists_ledger(csv_path: str, ledger: Dict[str, Dict]) -> None:
-    """Write the artists ledger dict back to CSV atomically."""
-    os.makedirs(os.path.dirname(csv_path) or ".", exist_ok=True)
-    fieldnames = ["mbid", "artist_name", "status", "attempts", "last_status_code", "last_checked"]
-    tmp_path = csv_path + ".tmp"
-    with open(tmp_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for _, row in sorted(ledger.items(), key=lambda kv: (kv[1].get("artist_name", ""), kv[0])):
-            writer.writerow(row)
-    os.replace(tmp_path, csv_path)
-
-
-def read_release_groups_ledger(csv_path: str) -> Dict[str, Dict]:
-    """Read existing release groups CSV into a dict keyed by RG MBID."""
-    ledger: Dict[str, Dict] = {}
-    if not os.path.exists(csv_path):
-        return ledger
-    
-    with open(csv_path, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            rg_mbid = (row.get("rg_mbid") or "").strip()
-            if not rg_mbid:
-                continue
-            ledger[rg_mbid] = {
-                "rg_mbid": rg_mbid,
-                "rg_title": row.get("rg_title", ""),
-                "artist_mbid": row.get("artist_mbid", ""),
-                "artist_name": row.get("artist_name", ""),
-                "artist_cache_status": row.get("artist_cache_status", ""),
-                "status": (row.get("status") or "").lower().strip(),
-                "attempts": int((row.get("attempts") or "0") or 0),
-                "last_status_code": row.get("last_status_code", ""),
-                "last_checked": row.get("last_checked", ""),
-            }
-    return ledger
-
-
-def write_release_groups_ledger(csv_path: str, ledger: Dict[str, Dict]) -> None:
-    """Write the release groups ledger dict back to CSV atomically."""
-    os.makedirs(os.path.dirname(csv_path) or ".", exist_ok=True)
-    fieldnames = ["rg_mbid", "rg_title", "artist_mbid", "artist_name", "artist_cache_status", 
-                  "status", "attempts", "last_status_code", "last_checked"]
-    tmp_path = csv_path + ".tmp"
-    with open(tmp_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for _, row in sorted(ledger.items(), key=lambda kv: (kv[1].get("artist_name", ""), kv[1].get("rg_title", ""), kv[0])):
-            writer.writerow(row)
-    os.replace(tmp_path, csv_path)
-
-
-def update_release_groups_artist_status(rg_ledger: Dict[str, Dict], artists_ledger: Dict[str, Dict]) -> None:
-    """Update artist_cache_status in release groups ledger based on current artist statuses."""
+def trigger_lidarr_refresh(base_url: str, api_key: str, artist_id: Optional[int]) -> None: groups ledger based on current artist statuses."""
     for rg_mbid, rg_data in rg_ledger.items():
         artist_mbid = rg_data.get("artist_mbid", "")
         if artist_mbid in artists_ledger:
@@ -392,13 +317,12 @@ def main():
         print(f"ERROR loading config: {e}", file=sys.stderr)
         sys.exit(2)
 
-    # Check if this is a first run (no existing CSV files)
-    is_first_run = not os.path.exists(cfg["artists_csv_path"])
-    if cfg["process_release_groups"]:
-        is_first_run = is_first_run or not os.path.exists(cfg["release_groups_csv_path"])
+    # Check if this is a first run (no existing storage)
+    storage = create_storage_backend(cfg)
+    is_first_run = not storage.exists()
     
     if is_first_run:
-        print("🔍 First run detected - no existing CSV files found")
+        print("🔍 First run detected - no existing storage found")
         print("   Enabling force modes for initial cache discovery (1 attempt per entity)")
         cfg["force_artists"] = True
         cfg["max_attempts_per_artist"] = 1
@@ -461,9 +385,9 @@ def main():
         print(f"ERROR fetching data from Lidarr: {e}", file=sys.stderr)
         sys.exit(2)
 
-    # Load existing ledgers
-    artists_ledger = read_artists_ledger(cfg["artists_csv_path"])
-    rg_ledger = read_release_groups_ledger(cfg["release_groups_csv_path"])
+    # Load existing ledgers using storage backend
+    artists_ledger = storage.read_artists_ledger()
+    rg_ledger = storage.read_release_groups_ledger()
 
     # Update artists ledger with current Lidarr data
     artists_new_count = 0
@@ -509,10 +433,10 @@ def main():
                 rg_ledger[rg_mbid]["artist_name"] = rg["artist_name"]
                 rg_ledger[rg_mbid]["artist_cache_status"] = artists_ledger.get(rg["artist_mbid"], {}).get("status", "")
 
-    # Write updated ledgers
-    write_artists_ledger(cfg["artists_csv_path"], artists_ledger)
+    # Write updated ledgers using storage backend
+    storage.write_artists_ledger(artists_ledger)
     if cfg["process_release_groups"]:
-        write_release_groups_ledger(cfg["release_groups_csv_path"], rg_ledger)
+        storage.write_release_groups_ledger(rg_ledger)
 
     print(f"Updated artists ledger: {len(artists)} total ({artists_new_count} new)")
     if cfg["process_release_groups"]:
@@ -544,7 +468,7 @@ def main():
         
         if len(artists_to_check) > 0:
             print(f"Will process {len(artists_to_check)} artists")
-            artist_results = process_artists(artists_to_check, artists_ledger, cfg)
+            artist_results = process_artists(artists_to_check, artists_ledger, cfg, storage)
             print(f"Artists phase complete: {artist_results}")
         else:
             print("No artists to process - all already successful")
@@ -562,9 +486,18 @@ def main():
         print(f"\n=== Phase 2: Processing Release Groups ===")
         
         # Re-read artists ledger to get updated statuses, then update RG artist statuses
-        artists_ledger = read_artists_ledger(cfg["artists_csv_path"])
-        update_release_groups_artist_status(rg_ledger, artists_ledger)
-        write_release_groups_ledger(cfg["release_groups_csv_path"], rg_ledger)
+        artists_ledger = storage.read_artists_ledger()
+        
+        # Use efficient SQLite update if available, otherwise update in memory
+        if hasattr(storage, 'update_release_groups_artist_status'):
+            storage.update_release_groups_artist_status(artists_ledger)
+        else:
+            # Fallback for CSV storage
+            for rg_mbid, rg_data in rg_ledger.items():
+                artist_mbid = rg_data.get("artist_mbid", "")
+                if artist_mbid in artists_ledger:
+                    rg_data["artist_cache_status"] = artists_ledger[artist_mbid].get("status", "")
+            storage.write_release_groups_ledger(rg_ledger)
         
         try:
             from process_releasegroups import process_release_groups
@@ -576,7 +509,7 @@ def main():
             
             if len(rgs_to_check) > 0:
                 print(f"Will process {len(rgs_to_check)} release groups (from successfully cached artists)")
-                rg_results = process_release_groups(rgs_to_check, rg_ledger, cfg)
+                rg_results = process_release_groups(rgs_to_check, rg_ledger, cfg, storage)
                 print(f"Release groups phase complete: {rg_results}")
             else:
                 print("No release groups to process")

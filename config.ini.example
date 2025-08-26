@@ -31,9 +31,15 @@ backoff_factor = 0.5
 max_backoff_seconds = 30
 
 [ledger]
-# CSV file paths for tracking cache status
+# Storage backend: "csv" (default) or "sqlite"
+storage_type = csv
+
+# CSV file paths (used when storage_type = csv)
 artists_csv_path = /data/mbid-artists.csv
 release_groups_csv_path = /data/mbid-releasegroups.csv
+
+# SQLite database path (used when storage_type = sqlite)  
+db_path = /data/mbid_cache.db
 
 [run]
 # Processing control
@@ -62,8 +68,8 @@ run_at_start = true
 # Optional: randomize pre-run delay each time, 0 to N seconds
 jitter_seconds = 0
 
-# Stop after a certain number of runs (0 = unlimited, 50 = default)
-max_runs = 50
+# Stop after a certain number of runs (0 = unlimited, 10 = default)
+max_runs = 10
 
 [actions]
 # Integration settings

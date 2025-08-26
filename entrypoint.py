@@ -35,9 +35,15 @@ backoff_factor = 0.5
 max_backoff_seconds = 30
 
 [ledger]
-# CSV file paths
+# Storage backend: csv (default) or sqlite
+storage_type = csv
+
+# CSV file paths (used when storage_type = csv)
 artists_csv_path = /data/mbid-artists.csv
 release_groups_csv_path = /data/mbid-releasegroups.csv
+
+# SQLite database path (used when storage_type = sqlite)
+db_path = /data/mbid_cache.db
 
 [run]
 # Processing control

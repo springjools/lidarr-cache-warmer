@@ -8,7 +8,7 @@ from typing import Dict, List, Tuple
 
 import aiohttp
 
-from main import write_release_groups_ledger, iso_now
+from main import iso_now
 
 
 class SafeRateLimiter:
@@ -193,6 +193,7 @@ async def check_release_groups_concurrent_with_timing(
     to_check: List[str],
     ledger: Dict[str, Dict],
     cfg: dict,
+    storage,
     overall_start_time: float,
     offset: int
 ) -> Tuple[int, int, int]:
@@ -283,7 +284,7 @@ async def check_release_groups_concurrent_with_timing(
             
             # Batch writing
             if global_position % cfg.get("batch_write_frequency", 5) == 0:
-                write_release_groups_ledger(cfg["release_groups_csv_path"], ledger)
+                storage.write_release_groups_ledger(ledger)
             
             # Progress reporting with batch stats
             if global_position % cfg.get("log_progress_every_n", 25) == 0:
@@ -311,7 +312,8 @@ async def check_release_groups_concurrent_with_timing(
 def process_release_groups_in_batches(
     to_check: List[str], 
     ledger: Dict[str, Dict],
-    cfg: dict
+    cfg: dict,
+    storage
 ) -> Tuple[int, int, int]:
     """Process release group MBIDs in batches. Returns (transitioned_count, total_new_successes, total_new_failures)"""
     batch_size = cfg.get("batch_size", 25)
@@ -331,7 +333,7 @@ def process_release_groups_in_batches(
         print(f"=== Release Groups Batch {batch_num}/{total_batches} ({len(batch)} release groups) ===")
         
         batch_transitioned, batch_successes, batch_failures = asyncio.run(
-            check_release_groups_concurrent_with_timing(batch, ledger, cfg, overall_start_time, total_processed)
+            check_release_groups_concurrent_with_timing(batch, ledger, cfg, storage, overall_start_time, total_processed)
         )
         
         total_transitioned += batch_transitioned
@@ -340,7 +342,7 @@ def process_release_groups_in_batches(
         total_processed += len(batch)
         
         # Write after each batch
-        write_release_groups_ledger(cfg["release_groups_csv_path"], ledger)
+        storage.write_release_groups_ledger(ledger)
         print(f"Release groups batch {batch_num} complete. Ledger updated.")
         
         # Optional: brief pause between batches
@@ -350,7 +352,7 @@ def process_release_groups_in_batches(
     return total_transitioned, total_new_successes, total_new_failures
 
 
-def process_release_groups(to_check: List[str], ledger: Dict[str, Dict], cfg: dict) -> dict:
+def process_release_groups(to_check: List[str], ledger: Dict[str, Dict], cfg: dict, storage) -> dict:
     """Main entry point for release group cache warming processing"""
     
     if len(to_check) == 0:
@@ -363,15 +365,15 @@ def process_release_groups(to_check: List[str], ledger: Dict[str, Dict], cfg: di
     try:
         if cfg.get("batch_size", 25) < len(to_check):
             # Use batch processing for large sets
-            transitioned, successes, failures = process_release_groups_in_batches(to_check, ledger, cfg)
+            transitioned, successes, failures = process_release_groups_in_batches(to_check, ledger, cfg, storage)
         else:
             # Process all at once for smaller sets
             transitioned, successes, failures = asyncio.run(
-                check_release_groups_concurrent_with_timing(to_check, ledger, cfg, time.time(), 0)
+                check_release_groups_concurrent_with_timing(to_check, ledger, cfg, storage, time.time(), 0)
             )
             
         # Final write
-        write_release_groups_ledger(cfg["release_groups_csv_path"], ledger)
+        storage.write_release_groups_ledger(ledger)
         
         return {
             "transitioned": transitioned,
@@ -381,9 +383,9 @@ def process_release_groups(to_check: List[str], ledger: Dict[str, Dict], cfg: di
         
     except KeyboardInterrupt:
         print("\n⚠️  Interrupted by user. Saving progress...")
-        write_release_groups_ledger(cfg["release_groups_csv_path"], ledger)
+        storage.write_release_groups_ledger(ledger)
         return {"transitioned": 0, "new_successes": 0, "new_failures": 0}
     except Exception as e:
         print(f"ERROR in release group processing: {e}")
-        write_release_groups_ledger(cfg["release_groups_csv_path"], ledger)
+        storage.write_release_groups_ledger(ledger)
         raise

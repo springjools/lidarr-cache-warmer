@@ -8,7 +8,7 @@ from typing import Dict, List, Tuple
 
 import aiohttp
 
-from main import write_artists_ledger, trigger_lidarr_refresh, iso_now
+from main import trigger_lidarr_refresh, iso_now
 
 
 class SafeRateLimiter:
@@ -193,6 +193,7 @@ async def check_artists_concurrent_with_timing(
     to_check: List[str],
     ledger: Dict[str, Dict],
     cfg: dict,
+    storage,
     overall_start_time: float,
     offset: int
 ) -> Tuple[int, int, int]:
@@ -288,9 +289,9 @@ async def check_artists_concurrent_with_timing(
             
             # Batch writing
             if global_position % cfg.get("batch_write_frequency", 5) == 0:
-                write_artists_ledger(cfg["artists_csv_path"], ledger)
+                storage.write_artists_ledger(ledger)
             
-            # Progress reporting with batch stats
+            # Progress reporting with batch stats - FIX: Count WITHIN this batch only
             if global_position % cfg.get("log_progress_every_n", 25) == 0:
                 elapsed_time = time.time() - overall_start_time
                 artists_per_sec = global_position / max(elapsed_time, 0.1)
@@ -303,12 +304,16 @@ async def check_artists_concurrent_with_timing(
                 
                 stats = rate_limiter.get_stats()
                 
-                # Calculate total processed in current batch so far
-                batch_processed = batch_successes + batch_timeouts
+                # FIX: Calculate batch progress correctly
+                # We want to show success rate for the items processed in the current reporting period
+                items_in_reporting_window = min(cfg.get("log_progress_every_n", 25), len(to_check))
+                start_of_window = max(0, global_position - items_in_reporting_window)
+                window_successes = batch_successes
+                window_total = batch_successes + batch_timeouts
                 
                 print(f"Progress: {global_position}/{total_to_process} ({(global_position/total_to_process*100):.1f}%) - "
                       f"Rate: {artists_per_sec:.1f} artists/sec - ETC: {etc_str} - "
-                      f"API: {stats.get('current_rate', 'N/A')} - Batch: {batch_successes}/{batch_processed} success")
+                      f"API: {stats.get('current_rate', 'N/A')} - Batch: {window_successes}/{window_total} success")
     
     return transitioned_count, new_successes, new_failures
 
@@ -316,7 +321,8 @@ async def check_artists_concurrent_with_timing(
 def process_artists_in_batches(
     to_check: List[str], 
     ledger: Dict[str, Dict],
-    cfg: dict
+    cfg: dict,
+    storage
 ) -> Tuple[int, int, int]:
     """Process artist MBIDs in batches. Returns (transitioned_count, total_new_successes, total_new_failures)"""
     batch_size = cfg.get("batch_size", 25)
@@ -336,7 +342,7 @@ def process_artists_in_batches(
         print(f"=== Artists Batch {batch_num}/{total_batches} ({len(batch)} artists) ===")
         
         batch_transitioned, batch_successes, batch_failures = asyncio.run(
-            check_artists_concurrent_with_timing(batch, ledger, cfg, overall_start_time, total_processed)
+            check_artists_concurrent_with_timing(batch, ledger, cfg, storage, overall_start_time, total_processed)
         )
         
         total_transitioned += batch_transitioned
@@ -345,7 +351,7 @@ def process_artists_in_batches(
         total_processed += len(batch)
         
         # Write after each batch
-        write_artists_ledger(cfg["artists_csv_path"], ledger)
+        storage.write_artists_ledger(ledger)
         print(f"Artists batch {batch_num} complete. Ledger updated.")
         
         # Optional: brief pause between batches
@@ -355,7 +361,7 @@ def process_artists_in_batches(
     return total_transitioned, total_new_successes, total_new_failures
 
 
-def process_artists(to_check: List[str], ledger: Dict[str, Dict], cfg: dict) -> dict:
+def process_artists(to_check: List[str], ledger: Dict[str, Dict], cfg: dict, storage) -> dict:
     """Main entry point for artist cache warming processing"""
     
     if len(to_check) == 0:
@@ -368,15 +374,15 @@ def process_artists(to_check: List[str], ledger: Dict[str, Dict], cfg: dict) -> 
     try:
         if cfg.get("batch_size", 25) < len(to_check):
             # Use batch processing for large sets
-            transitioned, successes, failures = process_artists_in_batches(to_check, ledger, cfg)
+            transitioned, successes, failures = process_artists_in_batches(to_check, ledger, cfg, storage)
         else:
             # Process all at once for smaller sets
             transitioned, successes, failures = asyncio.run(
-                check_artists_concurrent_with_timing(to_check, ledger, cfg, time.time(), 0)
+                check_artists_concurrent_with_timing(to_check, ledger, cfg, storage, time.time(), 0)
             )
             
         # Final write
-        write_artists_ledger(cfg["artists_csv_path"], ledger)
+        storage.write_artists_ledger(ledger)
         
         return {
             "transitioned": transitioned,
@@ -386,9 +392,9 @@ def process_artists(to_check: List[str], ledger: Dict[str, Dict], cfg: dict) -> 
         
     except KeyboardInterrupt:
         print("\n⚠️  Interrupted by user. Saving progress...")
-        write_artists_ledger(cfg["artists_csv_path"], ledger)
+        storage.write_artists_ledger(ledger)
         return {"transitioned": 0, "new_successes": 0, "new_failures": 0}
     except Exception as e:
         print(f"ERROR in artist processing: {e}")
-        write_artists_ledger(cfg["artists_csv_path"], ledger)
+        storage.write_artists_ledger(ledger)
         raise
