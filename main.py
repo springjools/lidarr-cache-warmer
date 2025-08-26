@@ -296,6 +296,24 @@ def check_api_health(target_base_url: str, timeout: int = 10) -> dict:
         health_info["error"] = str(e)
     
     return health_info
+    health_info = {
+        "available": False,
+        "response_time_ms": None,
+        "status_code": None,
+        "error": None
+    }
+    
+    try:
+        start_time = time.time()
+        response = requests.get(target_base_url, timeout=timeout)
+        health_info["response_time_ms"] = (time.time() - start_time) * 1000
+        health_info["status_code"] = response.status_code
+        health_info["available"] = response.status_code < 500
+        
+    except Exception as e:
+        health_info["error"] = str(e)
+    
+    return health_info
 
 
 def main():
