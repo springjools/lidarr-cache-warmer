@@ -38,9 +38,15 @@ backoff_factor = 0.5
 max_backoff_seconds = 30
 
 [ledger]
-# CSV file paths
+# Storage backend: csv (default) or sqlite
+storage_type = csv
+
+# CSV file paths (used when storage_type = csv)
 artists_csv_path = /data/mbid-artists.csv
 release_groups_csv_path = /data/mbid-releasegroups.csv
+
+# SQLite database path (used when storage_type = sqlite)
+db_path = /data/mbid_cache.db
 
 [run]
 # Processing control
@@ -249,13 +255,6 @@ def get_lidarr_release_groups(base_url: str, api_key: str, timeout: int = 30) ->
     )
 
 
-def trigger_lidarr_refresh(base_url: str, api_key: str, artist_id: Optional[int]) -> None: groups ledger based on current artist statuses."""
-    for rg_mbid, rg_data in rg_ledger.items():
-        artist_mbid = rg_data.get("artist_mbid", "")
-        if artist_mbid in artists_ledger:
-            rg_data["artist_cache_status"] = artists_ledger[artist_mbid].get("status", "")
-
-
 def trigger_lidarr_refresh(base_url: str, api_key: str, artist_id: Optional[int]) -> None:
     """Fire-and-forget refresh request to Lidarr for the given artist id."""
     if artist_id is None:
@@ -278,24 +277,6 @@ def trigger_lidarr_refresh(base_url: str, api_key: str, artist_id: Optional[int]
 
 def check_api_health(target_base_url: str, timeout: int = 10) -> dict:
     """Pre-flight check of the target API"""
-    health_info = {
-        "available": False,
-        "response_time_ms": None,
-        "status_code": None,
-        "error": None
-    }
-    
-    try:
-        start_time = time.time()
-        response = requests.get(target_base_url, timeout=timeout)
-        health_info["response_time_ms"] = (time.time() - start_time) * 1000
-        health_info["status_code"] = response.status_code
-        health_info["available"] = response.status_code < 500
-        
-    except Exception as e:
-        health_info["error"] = str(e)
-    
-    return health_info
     health_info = {
         "available": False,
         "response_time_ms": None,
