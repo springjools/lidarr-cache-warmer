@@ -48,8 +48,8 @@ db_path = /data/mbid_cache.db
 process_release_groups = false
 process_artist_textsearch = true
 force_artists = false
-force_rg = false
 force_text_search = false
+force_rg = false
 batch_size = 25
 batch_write_frequency = 5
 

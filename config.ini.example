@@ -19,6 +19,8 @@ rate_limit_per_second = 5
 # Per-entity cache warming settings
 # Try each artist up to 25 times to warm MBID cache
 max_attempts_per_artist = 25
+# Try each artist up to 25 times to warm text-based cache
+max_attempts_per_artist_textsearch = 25
 # Try each release group up to 15 times to warm cache  
 max_attempts_per_rg = 15
 
@@ -45,17 +47,17 @@ db_path = /data/mbid_cache.db
 [run]
 # Processing control - enable/disable each phase
 # Phase 1: Artist MBID cache warming (always enabled)
-# Phase 2: Artist text search cache warming (warms search-by-name cache)
+# Phase 2: Artist text search cache warming (warms search-by-name cache) [default "true"]
 process_artist_textsearch = true
 
-# Phase 3: Release group MBID cache warming  
+# Phase 3: Release group MBID cache warming [default "false"]
 process_release_groups = false
 
 # Force modes (re-check already successful entries)
 # When true, sets max attempts to 1 for quick refresh
 force_artists = false
-force_rg = false
 force_text_search = false
+force_rg = false
 
 # Processing options (frequent saves for safety)
 # Process in batches of 25 entities
