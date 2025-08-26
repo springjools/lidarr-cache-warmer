@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application files
 COPY entrypoint.py .
 COPY main.py .
+COPY config.py .
 COPY storage.py .
 COPY stats.py .
 COPY process_artists.py .

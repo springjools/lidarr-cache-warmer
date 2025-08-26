@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-import configparser
 import os
 import sys
 import time
@@ -8,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 import requests
+from config import load_config, validate_config
 from storage import create_storage_backend, iso_now
 
 DEFAULT_CONFIG = '''# config.ini
