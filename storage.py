@@ -138,10 +138,11 @@ class SQLiteStorage(StorageBackend):
         self._init_db()
     
     def _init_db(self):
-        """Initialize SQLite database with tables"""
+        """Initialize SQLite database with tables and handle migrations"""
         os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
         
         with sqlite3.connect(self.db_path) as conn:
+            # Create tables with basic structure first
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS artists (
                     mbid TEXT PRIMARY KEY,
@@ -149,10 +150,7 @@ class SQLiteStorage(StorageBackend):
                     status TEXT NOT NULL DEFAULT '',
                     attempts INTEGER NOT NULL DEFAULT 0,
                     last_status_code TEXT NOT NULL DEFAULT '',
-                    last_checked TEXT NOT NULL DEFAULT '',
-                    text_search_attempted INTEGER NOT NULL DEFAULT 0,
-                    text_search_success INTEGER NOT NULL DEFAULT 0,
-                    text_search_last_checked TEXT NOT NULL DEFAULT ''
+                    last_checked TEXT NOT NULL DEFAULT ''
                 )
             """)
             
@@ -171,7 +169,29 @@ class SQLiteStorage(StorageBackend):
                 )
             """)
             
-            # Create indexes for performance
+            # Add text search columns if they don't exist (migration)
+            try:
+                conn.execute("ALTER TABLE artists ADD COLUMN text_search_attempted INTEGER NOT NULL DEFAULT 0")
+                print("Added text_search_attempted column to artists table")
+            except sqlite3.OperationalError:
+                # Column already exists, which is fine
+                pass
+            
+            try:
+                conn.execute("ALTER TABLE artists ADD COLUMN text_search_success INTEGER NOT NULL DEFAULT 0")
+                print("Added text_search_success column to artists table")
+            except sqlite3.OperationalError:
+                # Column already exists, which is fine
+                pass
+            
+            try:
+                conn.execute("ALTER TABLE artists ADD COLUMN text_search_last_checked TEXT NOT NULL DEFAULT ''")
+                print("Added text_search_last_checked column to artists table")
+            except sqlite3.OperationalError:
+                # Column already exists, which is fine
+                pass
+            
+            # Create indexes for performance (only after columns exist)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_artists_status ON artists (status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_artists_text_search ON artists (text_search_attempted, text_search_success)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_rg_status ON release_groups (status)")
