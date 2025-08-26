@@ -8,7 +8,7 @@ from typing import Dict, List, Tuple
 
 import aiohttp
 
-from main import iso_now
+from storage import iso_now
 
 
 class SafeRateLimiter:

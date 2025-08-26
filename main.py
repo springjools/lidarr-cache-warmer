@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 import requests
-from storage import create_storage_backend
+from storage import create_storage_backend, iso_now
 
 DEFAULT_CONFIG = '''# config.ini
 # Generated automatically on first run. Edit and set your Lidarr API key.
@@ -71,10 +71,6 @@ max_runs = 50
 log_progress_every_n = 25
 log_level = INFO
 '''
-
-
-def iso_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def parse_bool(s: str, default: bool = False) -> bool:

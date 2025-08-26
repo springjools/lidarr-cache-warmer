@@ -8,7 +8,8 @@ from typing import Dict, List, Tuple
 
 import aiohttp
 
-from main import trigger_lidarr_refresh, iso_now
+from main import trigger_lidarr_refresh
+from storage import iso_now
 
 
 class SafeRateLimiter:

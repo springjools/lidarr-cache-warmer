@@ -3,9 +3,13 @@ import csv
 import os
 import sqlite3
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 from typing import Dict, List
 
-from main import iso_now
+
+def iso_now() -> str:
+    """Generate ISO timestamp for current UTC time"""
+    return datetime.now(timezone.utc).isoformat()
 
 
 class StorageBackend(ABC):
