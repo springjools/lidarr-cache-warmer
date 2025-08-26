@@ -165,11 +165,11 @@ Progress: 50/250 (20.0%) - Rate: 4.2 artists/sec - ETC: 14:32 - API: 3.00 req/se
 
 ### View Current Stats
 ```bash
-# Get comprehensive overview
-python stats.py --config /data/config.ini
+# Get comprehensive overview with Docker
+docker run --rm -v $(pwd)/data:/data --entrypoint python ghcr.io/devianteng/lidarr-cache-warmer:latest /app/stats.py --config /data/config.ini
 
-# Docker version  
-docker run --rm -v $(pwd)/data:/data ghcr.io/devianteng/lidarr-cache-warmer:latest python /app/stats.py --config /data/config.ini
+# Manual Python installation
+python stats.py --config /data/config.ini
 ```
 
 **Example Output:**
@@ -195,7 +195,7 @@ docker run --rm -v $(pwd)/data:/data ghcr.io/devianteng/lidarr-cache-warmer:late
 
 ---
 
-## 🐍 Manual Python Installation
+## 🔧 Manual Python Installation
 
 ```bash
 # Clone and setup
