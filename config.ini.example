@@ -17,40 +17,36 @@ max_concurrent_requests = 10
 rate_limit_per_second = 5
 
 # Per-entity cache warming settings
-# Try each artist up to 25 times to warm MBID cache
 max_attempts_per_artist = 25
-# Try each artist up to 25 times to warm text-based cache
 max_attempts_per_artist_textsearch = 25
-# Try each release group up to 15 times to warm cache  
 max_attempts_per_rg = 15
 
 # Circuit breaker settings (stops run if API is completely broken)
-# Stop after this many entities fail completely in a row
 circuit_breaker_threshold = 50
-# How aggressively to back off on errors (0.5 = moderate)
 backoff_factor = 0.5
-# Maximum wait time before retrying (reduced for faster recovery)
 max_backoff_seconds = 15
 
 [ledger]
 # Storage backend: "csv" (default) or "sqlite"
-# SQLite recommended for libraries with >1000 artists
+# SQLite recommended for libraries with >2000 artists
 storage_type = csv
 
 # CSV file paths (used when storage_type = csv)
 artists_csv_path = /data/mbid-artists.csv
 release_groups_csv_path = /data/mbid-releasegroups.csv
 
-# SQLite database path (used when storage_type = sqlite)  
+# SQLite database path (used when storage_type = sqlite)
 db_path = /data/mbid_cache.db
 
 [run]
-# Processing control - enable/disable each phase
+# Phase 0.2: Manual entry injection from YAML file
+process_manual_entries = false
+
 # Phase 1: Artist MBID cache warming (always enabled)
-# Phase 2: Artist text search cache warming (warms search-by-name cache) [default "true"]
+# Phase 2: Artist text search cache warming (warms search-by-name cache)
 process_artist_textsearch = true
 
-# Phase 3: Release group MBID cache warming [default "false"]
+# Phase 3: Release group MBID cache warming
 process_release_groups = false
 
 # Force modes (re-check already successful entries)
@@ -59,11 +55,15 @@ force_artists = false
 force_text_search = false
 force_rg = false
 
-# Processing options (frequent saves for safety)
 # Process in batches of 25 entities
 batch_size = 25
 # Save progress every 5 requests
 batch_write_frequency = 5
+
+[manual]
+# Manual entry injection settings (used when process_manual_entries = true)
+# Path to YAML file containing manual artist/release group entries
+manual_entries_file = /data/manual_entries.yml
 
 [schedule]
 # Scheduler settings (used by entrypoint.py for continuous operation)
@@ -76,7 +76,7 @@ run_at_start = true
 # Optional: randomize pre-run delay each time, 0 to N seconds
 jitter_seconds = 0
 
-# Stop after a certain number of runs (0 = unlimited, 25 = default)
+# Stop after a certain number of runs (25 = default)
 max_runs = 25
 
 [actions]

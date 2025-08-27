@@ -2,7 +2,7 @@
 
 Cache warming tool for **Lidarr** metadata. Fetches artist and release group MBIDs from your Lidarr instance and repeatedly probes them against an API endpoint until successful, triggering cache generation in the backend.
 
-**Multi-phase processing**: Warms artist MBID cache first, then artist text search cache, then release group cache (each phase optional and configurable).
+**Three-phase processing**: Warms artist MBID cache first, then artist text search cache, then release group cache (each phase optional and configurable).
 
 ## Requirements
 
@@ -36,6 +36,8 @@ docker logs -f lidarr-cache-warmer
 ### Docker Compose
 
 ```yaml
+version: '3.8'
+
 services:
   lidarr-cache-warmer:
     image: ghcr.io/devianteng/lidarr-cache-warmer:latest
@@ -43,45 +45,46 @@ services:
     restart: unless-stopped
     volumes:
       - ./data:/data
-```
-
----
-
-## 🔧 Manual Python Installation
-
-```bash
-# Clone and setup
-git clone https://github.com/devianteng/lidarr-cache-warmer.git
-cd lidarr-cache-warmer
-python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-
-# Run once (creates config.ini)
-python main.py --config config.ini
-
-# Edit config.ini with your Lidarr API key, then:
-python main.py --config config.ini
-
-# Or run on schedule:
-python entrypoint.py
+    # Optional environment variables:
+    # environment:
+    #   FORCE_ARTISTS: "true"        # Force refresh all artists
+    #   FORCE_TEXT_SEARCH: "true"    # Force refresh all text searches
+    #   FORCE_RG: "true"             # Force refresh all release groups
 ```
 
 ---
 
 ## ⚙️ Configuration
 
-On first run, creates `/data/config.ini`.  Full config options can be seen in config.ini.example.
-**Edit the API key before restarting:**
+On first run, creates `/data/config.ini`. **Edit the API key before restarting:**
 
 ```ini
 [lidarr]
 base_url = http://192.168.1.103:8686
 api_key  = YOUR_LIDARR_API_KEY
 
-[...]
-```
+[probe]
+target_base_url = https://api.lidarr.audio/api/v0.4
 
+# Per-phase cache warming attempts
+max_attempts_per_artist = 25            # Phase 1: Artist MBID warming
+max_attempts_per_artist_textsearch = 25 # Phase 2: Artist text search warming
+max_attempts_per_rg = 15                # Phase 3: Release group warming
+
+# API politeness settings
+max_concurrent_requests = 5
+rate_limit_per_second = 3
+delay_between_attempts = 0.5
+
+[run]
+# Enable/disable each processing phase
+process_artist_textsearch = true  # Phase 2: Artist text search warming
+process_release_groups = false    # Phase 3: Release group warming
+
+[schedule]
+interval_seconds = 3600         # Run every hour
+max_runs = 50                   # Stop after 50 scheduled runs
+```
 
 ### Key Settings
 
@@ -110,8 +113,8 @@ api_key  = YOUR_LIDARR_API_KEY
 
 | Library Size | Recommended Storage | Why |
 |--------------|-------------------|-----|
-| < 2,000 artists | `storage_type = csv` | Simple, human-readable files |
-| > 2,000 artists | `storage_type = sqlite` | **Much faster**, indexed queries, atomic updates |
+| < 1,000 artists | `storage_type = csv` | Simple, human-readable files |
+| > 1,000 artists | `storage_type = sqlite` | **Much faster**, indexed queries, atomic updates |
 | > 10,000 entities | `storage_type = sqlite` | **Essential** for reasonable performance |
 
 **SQLite Benefits:** 30MB+ CSV becomes ~1MB database, 100x faster updates, no file corruption risk, optimized text search tracking.
@@ -120,28 +123,19 @@ api_key  = YOUR_LIDARR_API_KEY
 
 ## 📊 What It Does
 
-### Multi-Phase Cache Warming Process
+### Three-Phase Cache Warming Process
 
 The tool operates in up to three distinct phases, each targeting different API cache systems:
-
-#### Phase 0.1: Build ledger from Lidarr (Always Enabled)
-- **Purpose**: Queries local lidarr instance to get list of artists and albums
-- **When**: Always runs first - foundation for all other phases
-- **Output**: Generates csv or sqlite db for data that needs to be processed
-
-#### Phase 0.2: Add manual entries into ledger (Optional, Default: Disabled)
-- **Purpose**: If you want to add records to cache that are not in Lidarr, you can add them to a yaml file to be processed
-- **When**: Manual list is injected into csv/sqlite db before processing starts
 
 #### Phase 1: Artist MBID Cache Warming (Always Enabled)
 - **Purpose**: Warms direct artist lookup cache using MusicBrainz IDs
 - **Endpoint**: `GET /artist/{mbid}`
-- **When**: Always runs
+- **When**: Always runs first - foundation for all other phases
 - **Retry Logic**: Up to 25 attempts per artist by default
 - **Output**: Updates artist `status` in storage
 
 #### Phase 2: Artist Text Search Cache Warming (Optional, Default: Enabled)
-- **Purpose**: Warms search-by-name cache for user queries like "metallica"
+- **Purpose**: Warms search-by-name cache for user queries like "metallica" 
 - **Endpoint**: `GET /search?type=all&query={artist_name}`
 - **When**: After Phase 1, for all artists with names
 - **Retry Logic**: Up to 25 attempts per text search by default
@@ -158,7 +152,8 @@ The tool operates in up to three distinct phases, each targeting different API c
 ### First Run: Cache Discovery
 On first run (no existing storage), the tool automatically enables **discovery mode**:
 - **1 attempt per entity** to quickly survey what's already cached
-- Creates baseline storage showing current cache state
+- **Text search disabled** on first run to prioritize MBID cache building
+- Creates baseline storage showing current cache state  
 - **Much faster** than full cache warming on potentially cached items
 
 ### Subsequent Runs: Targeted Cache Warming
@@ -168,20 +163,35 @@ On first run (no existing storage), the tool automatically enables **discovery m
    Enabling force modes for initial cache discovery (1 attempt per entity)
 
 === Phase 1: Artist MBID Cache Warming ===
-[1/25] Checking Artist Name [mbid] ... SUCCESS (code=200, attempts=1)  # Already cached!
-[2/25] Checking Another Artist [mbid] ... TIMEOUT (code=503, attempts=1)  # Needs warming
-Progress: 50/250 (20.0%) - Rate: 4.2 artists/sec - ETC: 14:32 - API: 3.00 req/sec - Batch: 20/25 success
+[1/250] Checking Artist Name [mbid] ... SUCCESS (code=200, attempts=1)  # Already cached!
+[2/250] Checking Another Artist [mbid] ... TIMEOUT (code=503, attempts=1)  # Needs warming
+Progress: 50/250 (20.0%) - Rate: 4.2 artists/sec - ETC: 14:32 - API: 3.00 req/sec - Batch: 30/50 success
 
 === Phase 2: Artist Text Search Cache Warming ===
-[1/25] Text search for Metallica ... SUCCESS (code=200, attempts=1)
-[2/25] Text search for Bob Dylan ... TIMEOUT (code=503, attempts=1)
-Progress: 50/200 (25.0%) - Rate: 3.8 searches/sec - ETC: 12:45 - API: 3.00 req/sec - Batch: 12/25 success
+[1/200] Text search for Metallica ... SUCCESS (code=200, attempts=1)
+[2/200] Text search for Bob Dylan ... TIMEOUT (code=503, attempts=3)  # Cache building
+Progress: 50/200 (25.0%) - Rate: 3.8 searches/sec - ETC: 12:45 - API: 3.00 req/sec - Batch: 45/50 success
 
 === Phase 3: Release Group Cache Warming ===
-[1/25] Checking Artist Name - Album Title [mbid] ... SUCCESS (code=200, attempts=1)
+[1/120] Checking Artist Name - Album Title [mbid] ... SUCCESS (code=200, attempts=1)
 ```
 
 **Subsequent runs** use full attempt limits and only process pending/failed items.
+
+### Generated Files
+- **`/data/mbid-artists.csv`** - Artist cache status with text search tracking
+- **`/data/mbid-releasegroups.csv`** - Release group cache status with artist context  
+- **`/data/results_YYYYMMDDTHHMMSSZ.log`** - Simple metrics per run
+
+### Text Search Cache Benefits
+
+Text search warming provides significant user experience improvements:
+- **Faster search results** when users search for artists by name in Lidarr
+- **Reduced API load** during peak usage times  
+- **Improved responsiveness** for music discovery workflows
+- **Proactive caching** before users actually search
+
+Example: Without text search warming, searching "metallica" might take 2-3 seconds while the cache builds. With warming, results appear instantly.
 
 ---
 
@@ -215,14 +225,111 @@ python stats.py --config /data/config.ini
    ✅ Text searches successful: 1,180 (98.3%)
    📊 Text search coverage: 96.4% of named artists
 
-💿 RELEASE GROUP STATISTICS:
+💿 RELEASE GROUP STATISTICS:  
    ✅ Successfully cached: 8,247 (67.1%)
    🎯 Eligible for processing: 12,089 (98.4% coverage)
 
 🚀 RECOMMENDATIONS:
    • Process 45 pending text searches
-   • Process 3,842 eligible release groups
+   • Process 3,842 eligible release groups  
    • Next run will execute: Phase 2: Text search warming, Phase 3: Release group warming
+```
+
+---
+
+## 🔧 Manual Python Installation
+
+```bash
+# Clone and setup
+git clone https://github.com/devianteng/lidarr-cache-warmer.git
+cd lidarr-cache-warmer
+python3 -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+
+# Run once (creates config.ini)
+python main.py --config config.ini
+
+# Edit config.ini with your Lidarr API key, then:
+python main.py --config config.ini
+
+# Or run on schedule:
+python entrypoint.py
+
+# View statistics:
+python stats.py --config config.ini
+```
+
+### CLI Options
+```bash
+# Force refresh modes (sets attempts to 1 for quick check)
+python main.py --config config.ini --force-artists
+python main.py --config config.ini --force-text-search  # NEW
+python main.py --config config.ini --force-rg
+
+# Preview what would be processed
+python main.py --config config.ini --dry-run
+```
+
+---
+
+## 🔧 Advanced Usage
+
+### Processing Modes
+
+**Artists Only:**
+```ini
+process_artist_textsearch = false
+process_release_groups = false
+```
+
+**Artists + Text Search (Recommended):**
+```ini  
+process_artist_textsearch = true
+process_release_groups = false
+```
+
+**Full Three-Phase Processing:**
+```ini
+process_artist_textsearch = true
+process_release_groups = true
+```
+
+### Force Refresh
+Quick re-evaluation of already successful entries:
+```bash
+# Via environment variables (Docker)
+FORCE_ARTISTS=true FORCE_TEXT_SEARCH=true FORCE_RG=true docker run ...
+
+# Via CLI (manual)
+python main.py --config config.ini --force-artists --force-text-search --force-rg
+```
+
+### Tuning Performance
+```ini
+# Conservative (public APIs, shared hosting)
+max_concurrent_requests = 3
+rate_limit_per_second = 2
+max_attempts_per_artist = 15
+max_attempts_per_artist_textsearch = 10
+
+# Aggressive (private APIs, dedicated servers)  
+max_concurrent_requests = 10
+rate_limit_per_second = 5
+max_attempts_per_artist = 50
+max_attempts_per_artist_textsearch = 30
+```
+
+### Text Search Optimization
+```ini
+# Disable text search for bandwidth-constrained environments
+process_artist_textsearch = false
+
+# Quick text search discovery (faster, less thorough)
+max_attempts_per_artist_textsearch = 5
+
+# Intensive text search warming (slower, more thorough)  
+max_attempts_per_artist_textsearch = 50
 ```
 
 ---
@@ -232,7 +339,7 @@ python stats.py --config /data/config.ini
 Cache warming is perfect for APIs where:
 1. **Backend generates data on-demand** (expensive computation/database queries)
 2. **Results are cached** after first successful generation
-3. **Cache misses return HTTP/503** until backend completes processing
+3. **Cache misses return 503/404** until backend completes processing
 4. **Repeated requests eventually succeed** when cache is ready
 
 ### Intelligent Processing
@@ -245,7 +352,7 @@ Cache warming is perfect for APIs where:
 The text search feature specifically targets the search-by-name cache system:
 
 1. **URL Encoding**: Properly handles special characters in artist names
-2. **Query Format**: Uses `?type=all&query={artist_name}` format for comprehensive results
+2. **Query Format**: Uses `?type=all&query={artist_name}` format for comprehensive results  
 3. **Cache Building**: Retries 503 responses as the search index builds
 4. **Success Tracking**: Records both attempt status and success status for analytics
 
@@ -253,20 +360,20 @@ This approach minimizes wasted effort and focuses cache warming where it provide
 
 ---
 
-## 🔧 Manual Entry YAML example (manual_entries.yml)
+## 🔄 Migration from Previous Versions
 
-```
-6ae6a016-91d7-46cc-be7d-5e8e5d320c54:
-  name: Adelitas Way
-  release-groups:
-    - bc4c3083-c484-4c2f-8983-dd82eb8b60c0
-    - 0f74aff2-8dee-4712-80a4-b464a9e8c384
+### Existing Users
+The text search feature is **fully backward compatible**:
+- **Existing CSV/SQLite files** work without modification
+- **New text search fields** are added automatically
+- **Default settings** enable text search warming
+- **No breaking changes** to existing configuration
 
-a8c1eb9a-2fb4-4f4f-8ada-62f30e27a1af:
-  name: Artemis Rising
-  # No release-groups needed
-```
+### Storage Migration
+When upgrading, the tool automatically:
+- **CSV**: Adds new columns for text search tracking  
+- **SQLite**: Adds new fields and indexes for text search data
+- **Preserves** all existing artist and release group data
+- **Populates** text search fields with appropriate defaults
 
----
-
-## Enjoy!
+No manual migration steps required!
