@@ -1,5 +1,27 @@
-#!/usr/bin/env python3
-import configparser
+# Phase 2: Process Text Search Cache Warming (if enabled)
+    print(f"DEBUG: Checking Phase 2 conditions:")
+    print(f"  cfg['process_artist_textsearch'] = {cfg['process_artist_textsearch']}")
+    print(f"  Type: {type(cfg['process_artist_textsearch'])}")
+    
+    if cfg["process_artist_textsearch"]:
+        print(f"\n=== Phase 2: Artist Text Search Cache Warming ===")
+        
+        # Re-read artists ledger to get updated statuses from Phase 1
+        artists_ledger = storage.read_artists_ledger()
+        
+        try:
+            from process_artist_textsearch import process_text_search
+            
+            # Only do text search for artists that have names and meet criteria
+            text_search_to_check = [mbid for mbid, row in artists_ledger.items()
+                                   if row.get("artist_name", "").strip() and
+                                      (cfg["force_text_search"] or not row.get("text_search_attempted", False))]
+            
+            if len(text_search_to_check) > 0:
+                print(f"Will process {len(text_search_to_check)} artists for text search cache warming")
+                text_search_results = process_text_search(text_search_to_check, artists_ledger, cfg, storage)
+                print(f"Text search warming complete: {text_search_results}")
+            else#!/usr/bin/env python3
 import argparse
 import os
 import sys
@@ -328,16 +350,27 @@ def main():
     storage = create_storage_backend(cfg)
     is_first_run = not storage.exists()
     
+    print(f"DEBUG: Storage exists: {storage.exists()}, is_first_run: {is_first_run}")
+    
     if is_first_run:
         print("🔍 First run detected - no existing storage found")
         print("   Enabling force modes for initial cache discovery (1 attempt per entity)")
         cfg["force_artists"] = True
         cfg["max_attempts_per_artist"] = 1
-        if cfg["process_release_groups"]:
+        
+        # Also enable text search discovery on first run if configured
+        if cfg.get("process_artist_textsearch", True):
+            cfg["force_text_search"] = True
+            cfg["max_attempts_per_artist_textsearch"] = 1
+            print("   Text search discovery enabled (1 attempt per artist)")
+        
+        # Also enable release group discovery on first run if configured
+        if cfg.get("process_release_groups", False):
             cfg["force_rg"] = True  
             cfg["max_attempts_per_rg"] = 1
-        # Don't force text search on first run - let MBID cache build first
-        cfg["process_artist_textsearch"] = False
+            print("   Release group discovery enabled (1 attempt per release group)")
+    else:
+        print(f"DEBUG: Subsequent run detected. process_artist_textsearch = {cfg['process_artist_textsearch']}")
 
     # Apply CLI overrides for force modes
     if args.force_artists:
