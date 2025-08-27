@@ -314,7 +314,8 @@ def main():
         # Show text search candidates
         if cfg["process_artist_textsearch"]:
             text_search_to_check = [mbid for mbid, row in artists_ledger.items()
-                                   if cfg["force_text_search"] or not row.get("text_search_attempted", False)]
+                                   if row.get("artist_name", "").strip() and
+                                      (cfg["force_text_search"] or not row.get("text_search_success", False))]
             print(f"Would process {len(text_search_to_check)} artists for text search warming")
         
         if cfg["process_release_groups"]:
@@ -361,7 +362,7 @@ def main():
             # Only do text search for artists that have names and meet criteria
             text_search_to_check = [mbid for mbid, row in artists_ledger.items()
                                    if row.get("artist_name", "").strip() and
-                                      (cfg["force_text_search"] or not row.get("text_search_attempted", False))]
+                                      (cfg["force_text_search"] or not row.get("text_search_success", False))]
             
             if len(text_search_to_check) > 0:
                 print(f"Will process {len(text_search_to_check)} artists for text search cache warming")
