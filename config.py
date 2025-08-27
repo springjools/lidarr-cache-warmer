@@ -47,11 +47,16 @@ db_path = /data/mbid_cache.db
 # Processing control - enable/disable each phase
 process_release_groups = false
 process_artist_textsearch = true
+process_manual_entries = false
 force_artists = false
-force_text_search = false
 force_rg = false
+force_text_search = false
 batch_size = 25
 batch_write_frequency = 5
+
+[manual]
+# Manual entry injection from YAML file
+manual_entries_file = /data/manual_entries.yml
 
 [actions]
 # If true, when a probe transitions from (no status or timeout) -> success,
@@ -136,10 +141,14 @@ def load_config(path: str) -> dict:
         # Processing control
         "process_release_groups": parse_bool(cp.get("run", "process_release_groups", fallback="false")),
         "process_artist_textsearch": parse_bool(cp.get("run", "process_artist_textsearch", fallback="true")),
+        "process_manual_entries": parse_bool(cp.get("run", "process_manual_entries", fallback="false")),
         "force_artists": parse_bool(cp.get("run", "force_artists", fallback="false")),
         "force_rg": parse_bool(cp.get("run", "force_rg", fallback="false")),
         "force_text_search": parse_bool(cp.get("run", "force_text_search", fallback="false")),
         "update_lidarr": parse_bool(cp.get("actions", "update_lidarr", fallback="false")),
+        
+        # Manual entries
+        "manual_entries_file": cp.get("manual", "manual_entries_file", fallback="/data/manual_entries.yml"),
         
         # Shared API settings
         "delay_between_attempts": cp.getfloat("probe", "delay_between_attempts", fallback=0.25),

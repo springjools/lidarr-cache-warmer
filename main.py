@@ -9,6 +9,7 @@ from typing import Dict, List, Optional
 import requests
 from config import load_config, validate_config
 from storage import create_storage_backend, iso_now
+from process_manual_entries import process_manual_entries
 
 
 def get_lidarr_artists(base_url: str, api_key: str, timeout: int = 30) -> List[Dict]:
@@ -240,6 +241,9 @@ def main():
     artists_ledger = storage.read_artists_ledger()
     rg_ledger = storage.read_release_groups_ledger()
 
+    # Phase 0.2: Process Manual Entries (if enabled)
+    manual_stats = process_manual_entries(cfg, artists_ledger, rg_ledger)
+
     # Update artists ledger with current Lidarr data
     artists_new_count = 0
     for artist in artists:
@@ -302,6 +306,13 @@ def main():
     print(f"Updated artists ledger: {len(artists)} total ({artists_new_count} new)")
     if cfg["process_release_groups"]:
         print(f"Updated release groups ledger: {len(rg_ledger)} total ({rg_new_count} new)")
+    
+    # Show manual entries summary if processed
+    if manual_stats["enabled"]:
+        if manual_stats["errors"] > 0:
+            print(f"⚠️  Manual entries had {manual_stats['errors']} validation errors")
+        elif manual_stats["artists_new"] > 0 or manual_stats["release_groups_new"] > 0:
+            print(f"🔧 Manual entries: +{manual_stats['artists_new']} artists, +{manual_stats['release_groups_new']} release groups")
 
     if args.dry_run:
         print("\n🧪 DRY RUN MODE - No API calls will be made")
@@ -314,8 +325,13 @@ def main():
         # Show text search candidates
         if cfg["process_artist_textsearch"]:
             text_search_to_check = [mbid for mbid, row in artists_ledger.items()
-                                   if cfg["force_text_search"] or not row.get("text_search_attempted", False)]
+                                   if row.get("artist_name", "").strip() and
+                                      (cfg["force_text_search"] or not row.get("text_search_success", False))]
             print(f"Would process {len(text_search_to_check)} artists for text search warming")
+        
+        # Show manual entries in dry run
+        if manual_stats["enabled"] and manual_stats["file_found"]:
+            print(f"Manual entries loaded: {manual_stats['artists_new'] + manual_stats['artists_updated']} artists, {manual_stats['release_groups_new'] + manual_stats['release_groups_updated']} release groups")
         
         if cfg["process_release_groups"]:
             rgs_to_check = [rg_mbid for rg_mbid, row in rg_ledger.items()
@@ -361,7 +377,7 @@ def main():
             # Only do text search for artists that have names and meet criteria
             text_search_to_check = [mbid for mbid, row in artists_ledger.items()
                                    if row.get("artist_name", "").strip() and
-                                      (cfg["force_text_search"] or not row.get("text_search_attempted", False))]
+                                      (cfg["force_text_search"] or not row.get("text_search_success", False))]
             
             if len(text_search_to_check) > 0:
                 print(f"Will process {len(text_search_to_check)} artists for text search cache warming")
@@ -467,6 +483,9 @@ def main():
             lf.write(f"force_text_search={'true' if cfg['force_text_search'] else 'false'}\n")
             lf.write(f"process_release_groups={'true' if cfg['process_release_groups'] else 'false'}\n")
             lf.write(f"process_artist_textsearch={'true' if cfg['process_artist_textsearch'] else 'false'}\n")
+            lf.write(f"process_manual_entries={'true' if cfg.get('process_manual_entries', False) else 'false'}\n")
+            lf.write(f"manual_artists_added={manual_stats.get('artists_new', 0)}\n")
+            lf.write(f"manual_rgs_added={manual_stats.get('release_groups_new', 0)}\n")
             lf.write(f"lidarr_refreshes_triggered={artist_results.get('transitioned', 0)}\n")
             
         print(f"Results log written to: {log_path}")
