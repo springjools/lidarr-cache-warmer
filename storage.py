@@ -71,6 +71,8 @@ class CSVStorage(StorageBackend):
                     "text_search_attempted": row.get("text_search_attempted", "").lower() in ("true", "1"),
                     "text_search_success": row.get("text_search_success", "").lower() in ("true", "1"),
                     "text_search_last_checked": row.get("text_search_last_checked", ""),
+                    # Manual entry field (with backwards compatibility)
+                    "manual_entry": row.get("manual_entry", "").lower() in ("true", "1"),
                 }
         return ledger
 
@@ -78,7 +80,7 @@ class CSVStorage(StorageBackend):
         """Write the artists ledger dict back to CSV atomically."""
         os.makedirs(os.path.dirname(self.artists_csv_path) or ".", exist_ok=True)
         fieldnames = ["mbid", "artist_name", "status", "attempts", "last_status_code", "last_checked",
-                      "text_search_attempted", "text_search_success", "text_search_last_checked"]
+                      "text_search_attempted", "text_search_success", "text_search_last_checked", "manual_entry"]
         tmp_path = self.artists_csv_path + ".tmp"
         with open(tmp_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -109,6 +111,8 @@ class CSVStorage(StorageBackend):
                     "attempts": int((row.get("attempts") or "0") or 0),
                     "last_status_code": row.get("last_status_code", ""),
                     "last_checked": row.get("last_checked", ""),
+                    # Manual entry field (with backwards compatibility)
+                    "manual_entry": row.get("manual_entry", "").lower() in ("true", "1"),
                 }
         return ledger
 
@@ -116,7 +120,7 @@ class CSVStorage(StorageBackend):
         """Write the release groups ledger dict back to CSV atomically."""
         os.makedirs(os.path.dirname(self.release_groups_csv_path) or ".", exist_ok=True)
         fieldnames = ["rg_mbid", "rg_title", "artist_mbid", "artist_name", "artist_cache_status", 
-                      "status", "attempts", "last_status_code", "last_checked"]
+                      "status", "attempts", "last_status_code", "last_checked", "manual_entry"]
         tmp_path = self.release_groups_csv_path + ".tmp"
         with open(tmp_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -191,12 +195,29 @@ class SQLiteStorage(StorageBackend):
                 # Column already exists, which is fine
                 pass
             
+            # Add manual_entry columns if they don't exist (migration)
+            try:
+                conn.execute("ALTER TABLE artists ADD COLUMN manual_entry INTEGER NOT NULL DEFAULT 0")
+                print("Added manual_entry column to artists table")
+            except sqlite3.OperationalError:
+                # Column already exists, which is fine
+                pass
+            
+            try:
+                conn.execute("ALTER TABLE release_groups ADD COLUMN manual_entry INTEGER NOT NULL DEFAULT 0")
+                print("Added manual_entry column to release_groups table")
+            except sqlite3.OperationalError:
+                # Column already exists, which is fine
+                pass
+            
             # Create indexes for performance (only after columns exist)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_artists_status ON artists (status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_artists_text_search ON artists (text_search_attempted, text_search_success)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_artists_manual ON artists (manual_entry)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_rg_status ON release_groups (status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_rg_artist_status ON release_groups (artist_cache_status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_rg_artist_mbid ON release_groups (artist_mbid)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_rg_manual ON release_groups (manual_entry)")
             
             conn.commit()
 
@@ -208,7 +229,8 @@ class SQLiteStorage(StorageBackend):
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("""
                 SELECT mbid, artist_name, status, attempts, last_status_code, last_checked,
-                       text_search_attempted, text_search_success, text_search_last_checked
+                       text_search_attempted, text_search_success, text_search_last_checked,
+                       manual_entry
                 FROM artists
                 ORDER BY artist_name, mbid
             """)
@@ -224,6 +246,7 @@ class SQLiteStorage(StorageBackend):
                     "text_search_attempted": bool(row["text_search_attempted"]),
                     "text_search_success": bool(row["text_search_success"]),
                     "text_search_last_checked": row["text_search_last_checked"],
+                    "manual_entry": bool(row["manual_entry"]),
                 }
         
         return ledger
@@ -235,8 +258,8 @@ class SQLiteStorage(StorageBackend):
                 conn.execute("""
                     INSERT OR REPLACE INTO artists 
                     (mbid, artist_name, status, attempts, last_status_code, last_checked,
-                     text_search_attempted, text_search_success, text_search_last_checked)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     text_search_attempted, text_search_success, text_search_last_checked, manual_entry)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     data["mbid"],
                     data["artist_name"],
@@ -246,7 +269,8 @@ class SQLiteStorage(StorageBackend):
                     data["last_checked"],
                     int(data.get("text_search_attempted", False)),
                     int(data.get("text_search_success", False)),
-                    data.get("text_search_last_checked", "")
+                    data.get("text_search_last_checked", ""),
+                    int(data.get("manual_entry", False))
                 ))
             conn.commit()
 
@@ -258,7 +282,7 @@ class SQLiteStorage(StorageBackend):
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("""
                 SELECT rg_mbid, rg_title, artist_mbid, artist_name, artist_cache_status,
-                       status, attempts, last_status_code, last_checked
+                       status, attempts, last_status_code, last_checked, manual_entry
                 FROM release_groups
                 ORDER BY artist_name, rg_title, rg_mbid
             """)
@@ -274,6 +298,7 @@ class SQLiteStorage(StorageBackend):
                     "attempts": row["attempts"],
                     "last_status_code": row["last_status_code"],
                     "last_checked": row["last_checked"],
+                    "manual_entry": bool(row["manual_entry"]),
                 }
         
         return ledger
@@ -285,8 +310,8 @@ class SQLiteStorage(StorageBackend):
                 conn.execute("""
                     INSERT OR REPLACE INTO release_groups 
                     (rg_mbid, rg_title, artist_mbid, artist_name, artist_cache_status,
-                     status, attempts, last_status_code, last_checked)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     status, attempts, last_status_code, last_checked, manual_entry)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     data["rg_mbid"],
                     data["rg_title"],
@@ -296,7 +321,8 @@ class SQLiteStorage(StorageBackend):
                     data["status"],
                     data["attempts"],
                     data["last_status_code"],
-                    data["last_checked"]
+                    data["last_checked"],
+                    int(data.get("manual_entry", False))
                 ))
             conn.commit()
 
