@@ -54,6 +54,10 @@ force_text_search = false
 batch_size = 25
 batch_write_frequency = 5
 
+# Text search preprocessing options
+artist_textsearch_lowercase = false
+artist_textsearch_remove_symbols = false
+
 [manual]
 # Manual entry injection from YAML file
 manual_entries_file = /data/manual_entries.yml
@@ -146,6 +150,10 @@ def load_config(path: str) -> dict:
         "force_rg": parse_bool(cp.get("run", "force_rg", fallback="false")),
         "force_text_search": parse_bool(cp.get("run", "force_text_search", fallback="false")),
         "update_lidarr": parse_bool(cp.get("actions", "update_lidarr", fallback="false")),
+        
+        # Text search processing options
+        "artist_textsearch_lowercase": parse_bool(cp.get("run", "artist_textsearch_lowercase", fallback="false")),
+        "artist_textsearch_remove_symbols": parse_bool(cp.get("run", "artist_textsearch_remove_symbols", fallback="false")),
         
         # Manual entries
         "manual_entries_file": cp.get("manual", "manual_entries_file", fallback="/data/manual_entries.yml"),

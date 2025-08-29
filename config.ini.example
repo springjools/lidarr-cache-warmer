@@ -60,6 +60,12 @@ batch_size = 25
 # Save progress every 5 requests
 batch_write_frequency = 5
 
+# Text search preprocessing options
+# Convert artist names to lowercase before text search (e.g., Metallica -> metallica)
+artist_textsearch_lowercase = false
+# Remove symbols and diacritics from artist names (e.g., Café Tacvba -> Cafe Tacvba)
+artist_textsearch_remove_symbols = false
+
 [manual]
 # Manual entry injection settings (used when process_manual_entries = true)
 # Path to YAML file containing manual artist/release group entries
