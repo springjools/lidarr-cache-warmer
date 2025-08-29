@@ -4,12 +4,40 @@ import random
 import time
 from collections import deque
 from datetime import datetime, timedelta
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 import aiohttp
 
-from main import trigger_lidarr_refresh
 from storage import iso_now
+
+
+def trigger_lidarr_refresh(base_url: str, api_key: str, artist_id: Optional[int], verify_ssl: bool = True) -> None:
+    """Fire-and-forget refresh request to Lidarr for the given artist id."""
+    if artist_id is None:
+        return
+    
+    import requests
+    session = requests.Session()
+    headers = {"X-Api-Key": api_key}
+    
+    # Configure SSL verification
+    session.verify = verify_ssl
+    if not verify_ssl:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        
+    payloads = [
+        {"name": "RefreshArtist", "artistIds": [artist_id]},
+        {"name": "RefreshArtist", "artistId": artist_id},
+    ]
+    for path in ("/api/v1/command", "/api/command"):
+        url = f"{base_url.rstrip('/')}{path}"
+        for body in payloads:
+            try:
+                session.post(url, headers=headers, json=body, timeout=0.5)
+                return
+            except Exception:
+                continue
 
 
 class SafeRateLimiter:
@@ -269,7 +297,7 @@ async def check_artists_concurrent_with_timing(
                     and prev_status in ("", "timeout")):
                     # For artists, we need to get the lidarr_id from somewhere
                     # This will need to be passed in or looked up
-                    trigger_lidarr_refresh(cfg["lidarr_url"], cfg["api_key"], None)  # TODO: Fix this
+                    trigger_lidarr_refresh(cfg["lidarr_url"], cfg["api_key"], None, cfg.get("verify_ssl", True))  # TODO: Fix this
                     transitioned_count += 1
                     print(f"  -> Triggered Lidarr refresh for {name}")
                 

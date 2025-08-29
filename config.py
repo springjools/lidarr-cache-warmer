@@ -12,6 +12,9 @@ DEFAULT_CONFIG = '''# config.ini
 base_url = http://192.168.1.103:8686
 api_key  = REPLACE_WITH_YOUR_LIDARR_API_KEY
 
+# TLS certification verification
+verify_ssl = true
+
 [probe]
 # API to probe for each MBID
 target_base_url = https://api.lidarr.audio/api/v0.4
@@ -133,6 +136,7 @@ def load_config(path: str) -> dict:
         # Core settings
         "lidarr_url": cp.get("lidarr", "base_url", fallback="http://192.168.1.103:8686"),
         "api_key": cp.get("lidarr", "api_key", fallback=""),
+        "verify_ssl": parse_bool(cp.get("lidarr", "verify_ssl", fallback="true")),
         "target_base_url": cp.get("probe", "target_base_url", fallback="https://api.lidarr.audio/api/v0.4"),
         "timeout_seconds": cp.getint("probe", "timeout_seconds", fallback=10),
         

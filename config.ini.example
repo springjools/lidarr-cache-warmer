@@ -6,6 +6,9 @@
 base_url = http://192.168.1.103:8686
 api_key  = REPLACE_WITH_YOUR_LIDARR_API_KEY
 
+# Disable TLS certification verification (i.e., self-signed certs)
+verify_ssl = true
+
 [probe]
 # API endpoint to probe for cache warming
 target_base_url = https://api.lidarr.audio/api/v0.4

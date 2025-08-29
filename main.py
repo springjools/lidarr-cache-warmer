@@ -12,10 +12,16 @@ from storage import create_storage_backend, iso_now
 from process_manual_entries import process_manual_entries
 
 
-def get_lidarr_artists(base_url: str, api_key: str, timeout: int = 30) -> List[Dict]:
+def get_lidarr_artists(base_url: str, api_key: str, verify_ssl: bool = True, timeout: int = 30) -> List[Dict]:
     """Fetch artists from Lidarr and return a list of dicts with {id, name, mbid}."""
     session = requests.Session()
     headers = {"X-Api-Key": api_key}
+    
+    # Configure SSL verification
+    session.verify = verify_ssl
+    if not verify_ssl:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     candidates = [
         "/api/v1/artist",
@@ -49,10 +55,16 @@ def get_lidarr_artists(base_url: str, api_key: str, timeout: int = 30) -> List[D
     )
 
 
-def get_lidarr_release_groups(base_url: str, api_key: str, timeout: int = 30) -> List[Dict]:
+def get_lidarr_release_groups(base_url: str, api_key: str, verify_ssl: bool = True, timeout: int = 30) -> List[Dict]:
     """Fetch release groups from Lidarr and return a list of dicts with album info."""
     session = requests.Session()
     headers = {"X-Api-Key": api_key}
+    
+    # Configure SSL verification
+    session.verify = verify_ssl
+    if not verify_ssl:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     candidates = [
         "/api/v1/album",
@@ -93,12 +105,19 @@ def get_lidarr_release_groups(base_url: str, api_key: str, timeout: int = 30) ->
     )
 
 
-def trigger_lidarr_refresh(base_url: str, api_key: str, artist_id: Optional[int]) -> None:
+def trigger_lidarr_refresh(base_url: str, api_key: str, artist_id: Optional[int], verify_ssl: bool = True) -> None:
     """Fire-and-forget refresh request to Lidarr for the given artist id."""
     if artist_id is None:
         return
     session = requests.Session()
     headers = {"X-Api-Key": api_key}
+    
+    # Configure SSL verification
+    session.verify = verify_ssl
+    if not verify_ssl:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        
     payloads = [
         {"name": "RefreshArtist", "artistIds": [artist_id]},
         {"name": "RefreshArtist", "artistId": artist_id},
@@ -210,6 +229,11 @@ def main():
             print(f"  - {issue}", file=sys.stderr)
         sys.exit(2)
 
+    # Show SSL verification status
+    if not cfg.get("verify_ssl", True):
+        print("⚠️  SSL certificate verification is DISABLED")
+        print("   This should only be used in trusted private networks")
+    
     # Pre-flight API health check
     print("Performing API health check...")
     api_health = check_api_health(cfg["target_base_url"])
@@ -223,12 +247,12 @@ def main():
     # Fetch data from Lidarr
     try:
         print("Fetching artists from Lidarr...")
-        artists = get_lidarr_artists(cfg["lidarr_url"], cfg["api_key"])
+        artists = get_lidarr_artists(cfg["lidarr_url"], cfg["api_key"], cfg.get("verify_ssl", True))
         print(f"✅ Found {len(artists)} artists in Lidarr")
         
         if cfg["process_release_groups"]:
             print("Fetching release groups from Lidarr...")
-            release_groups = get_lidarr_release_groups(cfg["lidarr_url"], cfg["api_key"])
+            release_groups = get_lidarr_release_groups(cfg["lidarr_url"], cfg["api_key"], cfg.get("verify_ssl", True))
             print(f"✅ Found {len(release_groups)} release groups in Lidarr")
         else:
             release_groups = []
@@ -487,6 +511,7 @@ def main():
             lf.write(f"manual_artists_added={manual_stats.get('artists_new', 0)}\n")
             lf.write(f"manual_rgs_added={manual_stats.get('release_groups_new', 0)}\n")
             lf.write(f"lidarr_refreshes_triggered={artist_results.get('transitioned', 0)}\n")
+            lf.write(f"verify_ssl={'true' if cfg.get('verify_ssl', True) else 'false'}\n")
             
         print(f"Results log written to: {log_path}")
     except Exception as e:
