@@ -4,7 +4,7 @@
 [lidarr]
 # Set to your Lidarr instance URL and API key
 base_url = http://192.168.1.103:8686
-api_key  = REPLACE_WITH_YOUR_LIDARR_API_KEY
+api_key = REPLACE_WITH_YOUR_LIDARR_API_KEY
 
 # Disable TLS certification verification (i.e., self-signed certs)
 verify_ssl = true

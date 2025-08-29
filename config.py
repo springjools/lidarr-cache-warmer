@@ -10,7 +10,7 @@ DEFAULT_CONFIG = '''# config.ini
 [lidarr]
 # Default Lidarr URL
 base_url = http://192.168.1.103:8686
-api_key  = REPLACE_WITH_YOUR_LIDARR_API_KEY
+api_key = REPLACE_WITH_YOUR_LIDARR_API_KEY
 
 # TLS certification verification
 verify_ssl = true
