@@ -55,8 +55,8 @@ batch_size = 25
 batch_write_frequency = 5
 
 # Text search preprocessing options
-artist_textsearch_lowercase = false
-artist_textsearch_remove_symbols = false
+artist_textsearch_lowercase = true
+artist_textsearch_remove_symbols = true
 
 [manual]
 # Manual entry injection from YAML file
