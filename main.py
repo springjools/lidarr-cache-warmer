@@ -123,7 +123,7 @@ def remove_various_artists_from_lidarr(base_url: str, api_key: str, artist_id: i
         url = f"{base_url.rstrip('/')}{endpoint}/{artist_id}"
         try:
             # Delete with deleteFiles=true to remove all associated files and albums
-            response = session.delete(url, params={"deleteFiles": "false", "addImportListExclusion": "true"}, timeout=timeout)
+            response = session.delete(url, params={"deleteFiles": "true", "addImportListExclusion": "true"}, timeout=timeout)
             if response.status_code in (200, 204, 404):  # 404 means already gone
                 print(f"   ✅ Successfully removed Various Artists from Lidarr (endpoint: {endpoint})")
                 return True
@@ -139,50 +139,42 @@ def remove_various_artists_from_lidarr(base_url: str, api_key: str, artist_id: i
 
 def check_and_handle_various_artists(artists: List[Dict], cfg: dict) -> tuple[List[Dict], bool]:
     """
-    Check for Various Artists (89ad4ac3-39f7-470e-963a-56509c546377) and remove if found.
-    Returns (filtered_artists_list_without_various_artists, deletion_occurred).
+    Check for Various Artists (89ad4ac3-39f7-470e-963a-56509c546377) and filter it out.
+    Returns (filtered_artists_list_without_various_artists, various_artists_detected).
     """
     VARIOUS_ARTISTS_MBID = "89ad4ac3-39f7-470e-963a-56509c546377"
     
     # Find Various Artists in the list
     various_artists_entry = None
     filtered_artists = []
-    deletion_occurred = False
+    various_artists_detected = False
     
     for artist in artists:
         if artist["mbid"] == VARIOUS_ARTISTS_MBID:
             various_artists_entry = artist
+            various_artists_detected = True
             print(f"🚨 DETECTED: Various Artists in library!")
             print(f"   Artist: {artist['name']} (ID: {artist['id']}, MBID: {artist['mbid']})")
             print(f"   This artist typically has 100,000+ albums and causes severe performance issues.")
+            print(f"⚠️  SKIPPING Various Artists - will not be processed for cache warming")
+            print(f"   Various Artists and its albums will be excluded from all processing")
         else:
             filtered_artists.append(artist)
     
-    if various_artists_entry:
-        print(f"🛠️  REMOVING Various Artists from Lidarr...")
+    if various_artists_detected:
+        albums_count = "unknown number of"
         try:
-            success = remove_various_artists_from_lidarr(
-                cfg["lidarr_url"],
-                cfg["api_key"], 
-                various_artists_entry["id"],
-                cfg.get("verify_ssl", True),
-                cfg.get("lidarr_timeout", 60)
-            )
-            
-            if success:
-                print(f"✅ Various Artists successfully removed from Lidarr")
-                print(f"   This should significantly improve performance for large libraries")
-                deletion_occurred = True
-            else:
-                print(f"⚠️  Could not automatically remove Various Artists")
-                print(f"   Please manually remove this artist from Lidarr to improve performance")
-                print(f"   Artist ID: {various_artists_entry['id']} (MBID: {VARIOUS_ARTISTS_MBID})")
-                
-        except Exception as e:
-            print(f"❌ Error attempting to remove Various Artists: {e}")
-            print(f"   Please manually remove this artist from Lidarr")
+            # Try to get a rough count of albums for user information
+            from collections import Counter
+            # This is just for user feedback, we don't actually fetch the data
+            print(f"📊 Various Artists typically contains 100,000+ albums")
+        except:
+            pass
+        
+        print(f"✅ Various Artists filtered out - will not impact cache warming performance")
+        print(f"   Cache warming will process {len(filtered_artists)} other artists")
     
-    return filtered_artists, deletion_occurred
+    return filtered_artists, various_artists_detected
 
 
 def filter_release_groups_by_artist(release_groups: List[Dict], allowed_artist_mbids: set) -> List[Dict]:
