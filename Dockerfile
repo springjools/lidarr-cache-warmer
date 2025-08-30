@@ -21,11 +21,8 @@ COPY process_artist_textsearch.py .
 COPY process_releasegroups.py .
 COPY process_manual_entries.py .
 
-# Work directory for mounted data (config.ini + CSV files/SQLite DB)
-WORKDIR /data
-
 # Optional: allow overriding the config path at runtime
-ENV CONFIG_PATH=/data/config.ini
+ENV CONFIG_PATH=/app/data/config.ini
 
 # Default entrypoint runs the scheduler for continuous operation
 ENTRYPOINT ["python", "/app/entrypoint.py"]
