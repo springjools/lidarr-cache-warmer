@@ -123,7 +123,7 @@ def remove_various_artists_from_lidarr(base_url: str, api_key: str, artist_id: i
         url = f"{base_url.rstrip('/')}{endpoint}/{artist_id}"
         try:
             # Delete with deleteFiles=true to remove all associated files and albums
-            response = session.delete(url, params={"deleteFiles": "true", "addImportListExclusion": "true"}, timeout=timeout)
+            response = session.delete(url, params={"deleteFiles": "false", "addImportListExclusion": "true"}, timeout=timeout)
             if response.status_code in (200, 204, 404):  # 404 means already gone
                 print(f"   ✅ Successfully removed Various Artists from Lidarr (endpoint: {endpoint})")
                 return True
