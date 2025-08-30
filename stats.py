@@ -21,7 +21,8 @@ def analyze_artists_stats(artists_ledger: Dict[str, Dict]) -> Dict[str, any]:
             "text_search_attempted": 0,
             "text_search_success": 0,
             "text_search_success_rate": 0.0,
-            "text_search_pending": 0
+            "text_search_pending": 0,
+            "artists_with_names": 0
         }
     
     total = len(artists_ledger)
