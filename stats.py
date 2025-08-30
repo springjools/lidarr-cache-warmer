@@ -139,6 +139,22 @@ def print_stats_report(cfg: dict):
     
     # Create storage backend and load data
     try:
+        # Check if storage files exist before creating backend
+        storage_type = cfg.get("storage_type", "csv").lower()
+        
+        if storage_type == "sqlite":
+            db_path = cfg.get("db_path", "mbid_cache.db")
+            if not os.path.exists(db_path):
+                print(f"❌ ERROR: SQLite database not found at {db_path}")
+                print(f"   Run the cache warmer first to create the database")
+                return
+        else:
+            artists_csv = cfg.get("artists_csv_path", "mbid-artists.csv") 
+            if not os.path.exists(artists_csv):
+                print(f"❌ ERROR: Artists CSV not found at {artists_csv}")
+                print(f"   Run the cache warmer first to create the CSV files")
+                return
+        
         storage = create_storage_backend(cfg)
         artists_ledger = storage.read_artists_ledger()
         rg_ledger = storage.read_release_groups_ledger()
