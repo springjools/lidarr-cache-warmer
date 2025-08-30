@@ -191,7 +191,7 @@ def load_config(path: str) -> dict:
         # Manual entries with path resolution
         "manual_entries_file": resolve_path(
             cp.get("manual", "manual_entries_file", fallback=""),
-            "manual_entries.yml"  # Changed from ./data/manual_entries.yml
+            "manual_entries.yml"
         ),
         
         # Shared API settings
