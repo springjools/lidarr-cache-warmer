@@ -12,7 +12,7 @@ from storage import create_storage_backend, iso_now
 from process_manual_entries import process_manual_entries
 
 
-def get_lidarr_artists(base_url: str, api_key: str, verify_ssl: bool = True, timeout: int = 30) -> List[Dict]:
+def get_lidarr_artists(base_url: str, api_key: str, verify_ssl: bool = True, timeout: int = 60) -> List[Dict]:
     """Fetch artists from Lidarr and return a list of dicts with {id, name, mbid}."""
     session = requests.Session()
     headers = {"X-Api-Key": api_key}
@@ -55,7 +55,7 @@ def get_lidarr_artists(base_url: str, api_key: str, verify_ssl: bool = True, tim
     )
 
 
-def get_lidarr_release_groups(base_url: str, api_key: str, verify_ssl: bool = True, timeout: int = 30) -> List[Dict]:
+def get_lidarr_release_groups(base_url: str, api_key: str, verify_ssl: bool = True, timeout: int = 60) -> List[Dict]:
     """Fetch release groups from Lidarr and return a list of dicts with album info."""
     session = requests.Session()
     headers = {"X-Api-Key": api_key}
@@ -105,7 +105,7 @@ def get_lidarr_release_groups(base_url: str, api_key: str, verify_ssl: bool = Tr
     )
 
 
-def trigger_lidarr_refresh(base_url: str, api_key: str, artist_id: Optional[int], verify_ssl: bool = True) -> None:
+def trigger_lidarr_refresh(base_url: str, api_key: str, artist_id: Optional[int], verify_ssl: bool = True, timeout: int = 5) -> None:
     """Fire-and-forget refresh request to Lidarr for the given artist id."""
     if artist_id is None:
         return
@@ -126,7 +126,7 @@ def trigger_lidarr_refresh(base_url: str, api_key: str, artist_id: Optional[int]
         url = f"{base_url.rstrip('/')}{path}"
         for body in payloads:
             try:
-                session.post(url, headers=headers, json=body, timeout=0.5)
+                session.post(url, headers=headers, json=body, timeout=timeout)
                 return
             except Exception:
                 continue
@@ -234,25 +234,29 @@ def main():
         print("⚠️  SSL certificate verification is DISABLED")
         print("   This should only be used in trusted private networks")
     
+    # Show timeout configuration
+    timeout_value = cfg.get("lidarr_timeout", 60)
+    print(f"Lidarr API timeout: {timeout_value} seconds")
+    
     # Pre-flight API health check
     print("Performing API health check...")
     api_health = check_api_health(cfg["target_base_url"])
     if api_health["available"]:
-        print(f"✅ Target API is healthy (response time: {api_health['response_time_ms']:.1f}ms)")
+        print(f"✅ Lidarr Metadata API is healthy (response time: {api_health['response_time_ms']:.1f}ms)")
     else:
-        print(f"⚠️  Target API health check failed: {api_health.get('error', 'Unknown error')}")
+        print(f"⚠️  Lidarr Metadata API health check failed: {api_health.get('error', 'Unknown error')}")
         if not args.dry_run:
             print("Continuing anyway, but expect potential issues...")
 
     # Fetch data from Lidarr
     try:
         print("Fetching artists from Lidarr...")
-        artists = get_lidarr_artists(cfg["lidarr_url"], cfg["api_key"], cfg.get("verify_ssl", True))
+        artists = get_lidarr_artists(cfg["lidarr_url"], cfg["api_key"], cfg.get("verify_ssl", True), cfg["lidarr_timeout"])
         print(f"✅ Found {len(artists)} artists in Lidarr")
         
         if cfg["process_release_groups"]:
             print("Fetching release groups from Lidarr...")
-            release_groups = get_lidarr_release_groups(cfg["lidarr_url"], cfg["api_key"], cfg.get("verify_ssl", True))
+            release_groups = get_lidarr_release_groups(cfg["lidarr_url"], cfg["api_key"], cfg.get("verify_ssl", True), cfg["lidarr_timeout"])
             print(f"✅ Found {len(release_groups)} release groups in Lidarr")
         else:
             release_groups = []
@@ -475,9 +479,13 @@ def main():
     
     # Write simple results log
     try:
-        os.makedirs("/data", exist_ok=True)
+        # Use config directory + data subdirectory for results log
+        config_dir = os.path.dirname(os.path.abspath(args.config))
+        results_dir = os.path.join(config_dir, "data") if config_dir else "./data"
+        os.makedirs(results_dir, exist_ok=True)
+        
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        log_path = f"/data/results_{ts}.log"
+        log_path = os.path.join(results_dir, f"results_{ts}.log")
         
         # Calculate final stats
         total_artist_successes = sum(1 for r in artists_ledger.values() if r.get("status") == "success")
@@ -512,6 +520,7 @@ def main():
             lf.write(f"manual_rgs_added={manual_stats.get('release_groups_new', 0)}\n")
             lf.write(f"lidarr_refreshes_triggered={artist_results.get('transitioned', 0)}\n")
             lf.write(f"verify_ssl={'true' if cfg.get('verify_ssl', True) else 'false'}\n")
+            lf.write(f"lidarr_timeout={cfg.get('lidarr_timeout', 60)}\n")
             
         print(f"Results log written to: {log_path}")
     except Exception as e:
