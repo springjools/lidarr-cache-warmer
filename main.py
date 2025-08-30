@@ -158,7 +158,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Lidarr cache warmer - warm API caches for artists and release groups."
     )
-    parser.add_argument("--config", required=True, help="Path to INI config (e.g., /data/config.ini)")
+    parser.add_argument("--config", required=True, help="Path to INI config (e.g., ./data/config.ini)")
     parser.add_argument("--force-artists", action="store_true",
                         help="Force re-check all artists (sets max_attempts_per_artist=1)")
     parser.add_argument("--force-rg", action="store_true",
