@@ -6,6 +6,14 @@
 base_url = http://192.168.1.103:8686
 api_key  = REPLACE_WITH_YOUR_LIDARR_API_KEY
 
+# Disable TLS certificate verification (useful for self-signed certs)
+# WARNING: Only use this for trusted private networks
+verify_ssl = true
+
+# Timeout for Lidarr API requests in seconds (increase for large libraries)
+# Large libraries with thousands of albums may need 120+ seconds; also consider using sqlite instead of csv
+lidarr_timeout = 60
+
 [probe]
 # API endpoint to probe for cache warming
 target_base_url = https://api.lidarr.audio/api/v0.4
@@ -32,11 +40,12 @@ max_backoff_seconds = 15
 storage_type = csv
 
 # CSV file paths (used when storage_type = csv)
-artists_csv_path = /data/mbid-artists.csv
-release_groups_csv_path = /data/mbid-releasegroups.csv
+# Paths can be absolute (/path/to/file) or relative to config file location (filename or ./filename)
+artists_csv_path = mbid-artists.csv
+release_groups_csv_path = mbid-releasegroups.csv
 
 # SQLite database path (used when storage_type = sqlite)
-db_path = /data/mbid_cache.db
+db_path = mbid_cache.db
 
 [run]
 # Phase 0.2: Manual entry injection from YAML file
@@ -60,10 +69,16 @@ batch_size = 25
 # Save progress every 5 requests
 batch_write_frequency = 5
 
+# Text search preprocessing options
+# Convert artist names to lowercase before text search (e.g., Metallica -> metallica)
+artist_textsearch_lowercase = true
+# Remove symbols and diacritics from artist names (e.g., Café Tacvba -> Cafe Tacvba)
+artist_textsearch_remove_symbols = true
+
 [manual]
 # Manual entry injection settings (used when process_manual_entries = true)
 # Path to YAML file containing manual artist/release group entries
-manual_entries_file = /data/manual_entries.yml
+manual_entries_file = manual_entries.yml
 
 [schedule]
 # Scheduler settings (used by entrypoint.py for continuous operation)

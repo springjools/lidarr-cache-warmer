@@ -12,6 +12,12 @@ DEFAULT_CONFIG = '''# config.ini
 base_url = http://192.168.1.103:8686
 api_key  = REPLACE_WITH_YOUR_LIDARR_API_KEY
 
+# TLS certificate verification
+verify_ssl = true
+
+# Timeout for Lidarr API requests in seconds (increase for large libraries)
+lidarr_timeout = 60
+
 [probe]
 # API to probe for each MBID
 target_base_url = https://api.lidarr.audio/api/v0.4
@@ -37,11 +43,11 @@ max_backoff_seconds = 15
 storage_type = csv
 
 # CSV file paths (used when storage_type = csv)
-artists_csv_path = /data/mbid-artists.csv
-release_groups_csv_path = /data/mbid-releasegroups.csv
+artists_csv_path = ./mbid-artists.csv
+release_groups_csv_path = ./mbid-releasegroups.csv
 
 # SQLite database path (used when storage_type = sqlite)
-db_path = /data/mbid_cache.db
+db_path = ./mbid_cache.db
 
 [run]
 # Processing control - enable/disable each phase
@@ -54,9 +60,13 @@ force_text_search = false
 batch_size = 25
 batch_write_frequency = 5
 
+# Text search preprocessing options
+artist_textsearch_lowercase = false
+artist_textsearch_remove_symbols = false
+
 [manual]
 # Manual entry injection from YAML file
-manual_entries_file = /data/manual_entries.yml
+manual_entries_file = ./manual_entries.yml
 
 [actions]
 # If true, when a probe transitions from (no status or timeout) -> success,
@@ -99,6 +109,9 @@ def validate_config(cfg: dict) -> List[str]:
     if cfg.get("timeout_seconds", 0) < 1:
         issues.append("timeout_seconds must be >= 1")
     
+    if cfg.get("lidarr_timeout", 0) < 1:
+        issues.append("lidarr_timeout must be >= 1")
+    
     if cfg.get("rate_limit_per_second", 0) <= 0:
         issues.append("rate_limit_per_second must be > 0")
     
@@ -124,19 +137,43 @@ def load_config(path: str) -> dict:
     if not cp.read(path, encoding="utf-8"):
         raise FileNotFoundError(f"Config file not found or unreadable: {path}")
 
-    # Load configuration with new structure
+    # Use config file's directory as base for relative paths
+    config_dir = os.path.dirname(os.path.abspath(path))
+    
+    # Helper function to resolve paths (absolute paths pass through, relative paths use config directory)
+    def resolve_path(config_path: str, default_path: str) -> str:
+        path_value = config_path if config_path else default_path
+        if os.path.isabs(path_value):
+            return path_value
+        # For relative paths starting with ./, remove the ./ and join with config_dir
+        if path_value.startswith('./'):
+            path_value = path_value[2:]
+        return os.path.join(config_dir, path_value)
+
+    # Load configuration with corrected path resolution
     cfg = {
         # Core settings
         "lidarr_url": cp.get("lidarr", "base_url", fallback="http://192.168.1.103:8686"),
         "api_key": cp.get("lidarr", "api_key", fallback=""),
+        "verify_ssl": parse_bool(cp.get("lidarr", "verify_ssl", fallback="true")),
+        "lidarr_timeout": cp.getint("lidarr", "lidarr_timeout", fallback=60),
         "target_base_url": cp.get("probe", "target_base_url", fallback="https://api.lidarr.audio/api/v0.4"),
         "timeout_seconds": cp.getint("probe", "timeout_seconds", fallback=10),
         
-        # Storage settings
+        # Storage settings with path resolution
         "storage_type": cp.get("ledger", "storage_type", fallback="csv"),
-        "artists_csv_path": cp.get("ledger", "artists_csv_path", fallback="/data/mbid-artists.csv"),
-        "release_groups_csv_path": cp.get("ledger", "release_groups_csv_path", fallback="/data/mbid-releasegroups.csv"),
-        "db_path": cp.get("ledger", "db_path", fallback="/data/mbid_cache.db"),
+        "artists_csv_path": resolve_path(
+            cp.get("ledger", "artists_csv_path", fallback=""),
+            "mbid-artists.csv"  # Changed from ./data/mbid-artists.csv
+        ),
+        "release_groups_csv_path": resolve_path(
+            cp.get("ledger", "release_groups_csv_path", fallback=""),
+            "mbid-releasegroups.csv"  # Changed from ./data/mbid-releasegroups.csv
+        ),
+        "db_path": resolve_path(
+            cp.get("ledger", "db_path", fallback=""),
+            "mbid_cache.db"  # Changed from ./data/mbid_cache.db
+        ),
         
         # Processing control
         "process_release_groups": parse_bool(cp.get("run", "process_release_groups", fallback="false")),
@@ -147,8 +184,15 @@ def load_config(path: str) -> dict:
         "force_text_search": parse_bool(cp.get("run", "force_text_search", fallback="false")),
         "update_lidarr": parse_bool(cp.get("actions", "update_lidarr", fallback="false")),
         
-        # Manual entries
-        "manual_entries_file": cp.get("manual", "manual_entries_file", fallback="/data/manual_entries.yml"),
+        # Text search processing options
+        "artist_textsearch_lowercase": parse_bool(cp.get("run", "artist_textsearch_lowercase", fallback="false")),
+        "artist_textsearch_remove_symbols": parse_bool(cp.get("run", "artist_textsearch_remove_symbols", fallback="false")),
+        
+        # Manual entries with path resolution
+        "manual_entries_file": resolve_path(
+            cp.get("manual", "manual_entries_file", fallback=""),
+            "manual_entries.yml"
+        ),
         
         # Shared API settings
         "delay_between_attempts": cp.getfloat("probe", "delay_between_attempts", fallback=0.25),

@@ -23,16 +23,19 @@ def parse_bool(s: str, default: bool = False) -> bool:
     return s.strip().lower() in ("1", "true", "yes", "on")
 
 def main():
-    # Allow overriding the config path via env var, default to /data/config.ini
-    config_path = os.environ.get("CONFIG_PATH", "/data/config.ini")
+    # Resolve CONFIG_PATH and normalize to absolute early
+    raw_cfg = os.environ.get("CONFIG_PATH", "/app/data/config.ini")
+    config_path = raw_cfg if os.path.isabs(raw_cfg) else os.path.abspath(raw_cfg)
 
-    # If config is missing, create and exit so the user can fill in the API key.
+    # If config is missing, create and exit so the user can fill it in
+    cfg_dir = os.path.dirname(config_path) or "."
     if not os.path.exists(config_path):
-        os.makedirs(os.path.dirname(config_path) or ".", exist_ok=True)
+        os.makedirs(cfg_dir, exist_ok=True)
         with open(config_path, "w", encoding="utf-8") as f:
             f.write(DEFAULT_CONFIG)
         print(f"[{datetime.now().isoformat()}] Created default config at {config_path}. Please edit api_key and restart.", flush=True)
         sys.exit(1)
+
 
     # Load schedule settings
     cp = configparser.ConfigParser()

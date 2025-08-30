@@ -12,10 +12,16 @@ from storage import create_storage_backend, iso_now
 from process_manual_entries import process_manual_entries
 
 
-def get_lidarr_artists(base_url: str, api_key: str, timeout: int = 30) -> List[Dict]:
+def get_lidarr_artists(base_url: str, api_key: str, verify_ssl: bool = True, timeout: int = 60) -> List[Dict]:
     """Fetch artists from Lidarr and return a list of dicts with {id, name, mbid}."""
     session = requests.Session()
     headers = {"X-Api-Key": api_key}
+    
+    # Configure SSL verification
+    session.verify = verify_ssl
+    if not verify_ssl:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     candidates = [
         "/api/v1/artist",
@@ -49,10 +55,16 @@ def get_lidarr_artists(base_url: str, api_key: str, timeout: int = 30) -> List[D
     )
 
 
-def get_lidarr_release_groups(base_url: str, api_key: str, timeout: int = 30) -> List[Dict]:
+def get_lidarr_release_groups(base_url: str, api_key: str, verify_ssl: bool = True, timeout: int = 60) -> List[Dict]:
     """Fetch release groups from Lidarr and return a list of dicts with album info."""
     session = requests.Session()
     headers = {"X-Api-Key": api_key}
+    
+    # Configure SSL verification
+    session.verify = verify_ssl
+    if not verify_ssl:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     candidates = [
         "/api/v1/album",
@@ -93,12 +105,119 @@ def get_lidarr_release_groups(base_url: str, api_key: str, timeout: int = 30) ->
     )
 
 
-def trigger_lidarr_refresh(base_url: str, api_key: str, artist_id: Optional[int]) -> None:
+def remove_various_artists_from_lidarr(base_url: str, api_key: str, artist_id: int, verify_ssl: bool = True, timeout: int = 30) -> bool:
+    """Remove Various Artists and all its albums from Lidarr"""
+    session = requests.Session()
+    headers = {"X-Api-Key": api_key}
+    
+    # Configure SSL verification
+    session.verify = verify_ssl
+    if not verify_ssl:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    
+    # Try different API endpoints for artist deletion
+    endpoints = ["/api/v1/artist", "/api/artist", "/api/v3/artist"]
+    
+    for endpoint in endpoints:
+        url = f"{base_url.rstrip('/')}{endpoint}/{artist_id}"
+        try:
+            # Delete with deleteFiles=true to remove all associated files and albums
+            response = session.delete(url, params={"deleteFiles": "true", "addImportListExclusion": "true"}, timeout=timeout)
+            if response.status_code in (200, 204, 404):  # 404 means already gone
+                print(f"   ✅ Successfully removed Various Artists from Lidarr (endpoint: {endpoint})")
+                return True
+            elif response.status_code != 404:
+                print(f"   ⚠️  Delete attempt returned {response.status_code} (endpoint: {endpoint})")
+        except Exception as e:
+            print(f"   ⚠️  Error deleting via {endpoint}: {e}")
+            continue
+    
+    print(f"   ❌ Failed to remove Various Artists from all API endpoints")
+    return False
+
+
+def check_and_handle_various_artists(artists: List[Dict], cfg: dict) -> tuple[List[Dict], bool]:
+    """
+    Check for Various Artists (89ad4ac3-39f7-470e-963a-56509c546377) and remove if found.
+    Returns (filtered_artists_list_without_various_artists, deletion_occurred).
+    """
+    VARIOUS_ARTISTS_MBID = "89ad4ac3-39f7-470e-963a-56509c546377"
+    
+    # Find Various Artists in the list
+    various_artists_entry = None
+    filtered_artists = []
+    deletion_occurred = False
+    
+    for artist in artists:
+        if artist["mbid"] == VARIOUS_ARTISTS_MBID:
+            various_artists_entry = artist
+            print(f"🚨 DETECTED: Various Artists in library!")
+            print(f"   Artist: {artist['name']} (ID: {artist['id']}, MBID: {artist['mbid']})")
+            print(f"   This artist typically has 100,000+ albums and causes severe performance issues.")
+        else:
+            filtered_artists.append(artist)
+    
+    if various_artists_entry:
+        print(f"🛠️  REMOVING Various Artists from Lidarr...")
+        try:
+            success = remove_various_artists_from_lidarr(
+                cfg["lidarr_url"],
+                cfg["api_key"], 
+                various_artists_entry["id"],
+                cfg.get("verify_ssl", True),
+                cfg.get("lidarr_timeout", 60)
+            )
+            
+            if success:
+                print(f"✅ Various Artists successfully removed from Lidarr")
+                print(f"   This should significantly improve performance for large libraries")
+                deletion_occurred = True
+            else:
+                print(f"⚠️  Could not automatically remove Various Artists")
+                print(f"   Please manually remove this artist from Lidarr to improve performance")
+                print(f"   Artist ID: {various_artists_entry['id']} (MBID: {VARIOUS_ARTISTS_MBID})")
+                
+        except Exception as e:
+            print(f"❌ Error attempting to remove Various Artists: {e}")
+            print(f"   Please manually remove this artist from Lidarr")
+    
+    return filtered_artists, deletion_occurred
+
+
+def filter_release_groups_by_artist(release_groups: List[Dict], allowed_artist_mbids: set) -> List[Dict]:
+    """Filter out release groups from excluded artists (like Various Artists)"""
+    VARIOUS_ARTISTS_MBID = "89ad4ac3-39f7-470e-963a-56509c546377"
+    
+    filtered_rgs = []
+    excluded_count = 0
+    
+    for rg in release_groups:
+        artist_mbid = rg.get("artist_mbid", "")
+        if artist_mbid == VARIOUS_ARTISTS_MBID:
+            excluded_count += 1
+        elif artist_mbid in allowed_artist_mbids:
+            filtered_rgs.append(rg)
+    
+    if excluded_count > 0:
+        print(f"🚫 Excluded {excluded_count:,} release groups from Various Artists")
+    
+    return filtered_rgs
+
+
+def trigger_lidarr_refresh(base_url: str, api_key: str, artist_id: Optional[int], verify_ssl: bool = True, timeout: int = 5) -> None:
     """Fire-and-forget refresh request to Lidarr for the given artist id."""
     if artist_id is None:
         return
     session = requests.Session()
     headers = {"X-Api-Key": api_key}
+    
+    # Configure SSL verification
+    session.verify = verify_ssl
+    if not verify_ssl:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        
     payloads = [
         {"name": "RefreshArtist", "artistIds": [artist_id]},
         {"name": "RefreshArtist", "artistId": artist_id},
@@ -107,7 +226,7 @@ def trigger_lidarr_refresh(base_url: str, api_key: str, artist_id: Optional[int]
         url = f"{base_url.rstrip('/')}{path}"
         for body in payloads:
             try:
-                session.post(url, headers=headers, json=body, timeout=0.5)
+                session.post(url, headers=headers, json=body, timeout=timeout)
                 return
             except Exception:
                 continue
@@ -139,7 +258,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Lidarr cache warmer - warm API caches for artists and release groups."
     )
-    parser.add_argument("--config", required=True, help="Path to INI config (e.g., /data/config.ini)")
+    parser.add_argument("--config", required=True, help="Path to INI config (e.g., ./data/config.ini)")
     parser.add_argument("--force-artists", action="store_true",
                         help="Force re-check all artists (sets max_attempts_per_artist=1)")
     parser.add_argument("--force-rg", action="store_true",
@@ -210,26 +329,49 @@ def main():
             print(f"  - {issue}", file=sys.stderr)
         sys.exit(2)
 
+    # Show SSL verification status
+    if not cfg.get("verify_ssl", True):
+        print("⚠️  SSL certificate verification is DISABLED")
+        print("   This should only be used in trusted private networks")
+    
+    # Show timeout configuration
+    timeout_value = cfg.get("lidarr_timeout", 60)
+    print(f"Lidarr API timeout: {timeout_value} seconds")
+    
     # Pre-flight API health check
     print("Performing API health check...")
     api_health = check_api_health(cfg["target_base_url"])
     if api_health["available"]:
-        print(f"✅ Target API is healthy (response time: {api_health['response_time_ms']:.1f}ms)")
+        print(f"✅ Lidarr Metadata API is healthy (response time: {api_health['response_time_ms']:.1f}ms)")
     else:
-        print(f"⚠️  Target API health check failed: {api_health.get('error', 'Unknown error')}")
+        print(f"⚠️  Lidarr Metadata API health check failed: {api_health.get('error', 'Unknown error')}")
         if not args.dry_run:
             print("Continuing anyway, but expect potential issues...")
 
     # Fetch data from Lidarr
     try:
         print("Fetching artists from Lidarr...")
-        artists = get_lidarr_artists(cfg["lidarr_url"], cfg["api_key"])
-        print(f"✅ Found {len(artists)} artists in Lidarr")
+        artists = get_lidarr_artists(cfg["lidarr_url"], cfg["api_key"], cfg.get("verify_ssl", True), cfg["lidarr_timeout"])
+        
+        # *** NEW: Check for and remove Various Artists ***
+        artists, various_artists_deleted = check_and_handle_various_artists(artists, cfg)
+        
+        print(f"✅ Found {len(artists)} artists in Lidarr (after filtering)")
         
         if cfg["process_release_groups"]:
+            # Wait for Various Artists deletion to complete before fetching release groups
+            if various_artists_deleted:
+                print("⏱️  Waiting 30 seconds for Lidarr to complete Various Artists deletion...")
+                time.sleep(30)
+            
             print("Fetching release groups from Lidarr...")
-            release_groups = get_lidarr_release_groups(cfg["lidarr_url"], cfg["api_key"])
-            print(f"✅ Found {len(release_groups)} release groups in Lidarr")
+            release_groups = get_lidarr_release_groups(cfg["lidarr_url"], cfg["api_key"], cfg.get("verify_ssl", True), cfg["lidarr_timeout"])
+            
+            # *** NEW: Filter out release groups from Various Artists ***
+            allowed_artist_mbids = {artist["mbid"] for artist in artists}
+            release_groups = filter_release_groups_by_artist(release_groups, allowed_artist_mbids)
+            
+            print(f"✅ Found {len(release_groups)} release groups in Lidarr (after filtering)")
         else:
             release_groups = []
             
@@ -451,9 +593,13 @@ def main():
     
     # Write simple results log
     try:
-        os.makedirs("/data", exist_ok=True)
+        # Use config directory + data subdirectory for results log
+        config_dir = os.path.dirname(os.path.abspath(args.config))
+        results_dir = os.path.join(config_dir, "data") if config_dir else "./data"
+        os.makedirs(results_dir, exist_ok=True)
+        
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        log_path = f"/data/results_{ts}.log"
+        log_path = os.path.join(results_dir, f"results_{ts}.log")
         
         # Calculate final stats
         total_artist_successes = sum(1 for r in artists_ledger.values() if r.get("status") == "success")
@@ -487,6 +633,8 @@ def main():
             lf.write(f"manual_artists_added={manual_stats.get('artists_new', 0)}\n")
             lf.write(f"manual_rgs_added={manual_stats.get('release_groups_new', 0)}\n")
             lf.write(f"lidarr_refreshes_triggered={artist_results.get('transitioned', 0)}\n")
+            lf.write(f"verify_ssl={'true' if cfg.get('verify_ssl', True) else 'false'}\n")
+            lf.write(f"lidarr_timeout={cfg.get('lidarr_timeout', 60)}\n")
             
         print(f"Results log written to: {log_path}")
     except Exception as e:

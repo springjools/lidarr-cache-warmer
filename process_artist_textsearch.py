@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import asyncio
+import re
 import time
+import unicodedata
 import urllib.parse
 from collections import deque
 from datetime import datetime, timedelta
@@ -9,6 +11,57 @@ from typing import Dict, List, Tuple
 import aiohttp
 
 from storage import iso_now
+
+
+def process_artist_name_for_text_search(
+    artist_name: str, 
+    convert_to_lowercase: bool = False, 
+    remove_symbols_and_diacritics: bool = False
+) -> str:
+    """
+    Process artist name for text search based on configuration options.
+    
+    Args:
+        artist_name: Original artist name from database/API
+        convert_to_lowercase: Whether to convert to lowercase
+        remove_symbols_and_diacritics: Whether to remove symbols and diacritics
+        
+    Returns:
+        Processed artist name for text search
+        
+    Examples:
+        >>> process_artist_name_for_text_search("Café Tacvba", False, True)
+        'Cafe Tacvba'
+        >>> process_artist_name_for_text_search("Metallica", True, False)
+        'metallica'
+        >>> process_artist_name_for_text_search("Sigur Rós", True, True)
+        'sigur ros'
+    """
+    if not artist_name or not artist_name.strip():
+        return artist_name
+        
+    processed_name = artist_name.strip()
+
+    if remove_symbols_and_diacritics:
+        # Remove diacritics (accents, umlauts, etc.)
+        processed_name = unicodedata.normalize('NFKD', processed_name)
+        processed_name = ''.join(c for c in processed_name if not unicodedata.combining(c))
+
+        # Replace common word separators with spaces
+        # Include various types of dashes and separators
+        processed_name = re.sub(r'[-_.\/\u2013\u2014\u2010\u2011]+', ' ', processed_name)
+
+        # Remove remaining symbols but keep alphanumeric and spaces
+        # Use explicit character class to avoid \w underscore inclusion issue
+        processed_name = re.sub(r'[^a-zA-Z0-9\s]', '', processed_name)
+
+        # Clean up multiple spaces and trim
+        processed_name = re.sub(r'\s+', ' ', processed_name).strip()
+
+    if convert_to_lowercase:
+        processed_name = processed_name.lower()
+
+    return processed_name
 
 
 class SafeRateLimiter:
@@ -150,7 +203,9 @@ async def check_text_search_with_cache_warming(
     target_base_url: str,
     max_attempts: int = 25,
     delay_between_attempts: float = 0.5,
-    timeout: int = 10
+    timeout: int = 10,
+    convert_to_lowercase: bool = False,
+    remove_symbols_and_diacritics: bool = False
 ) -> Tuple[str, str, int, float]:
     """
     Perform text search with cache warming - keep trying until success or max attempts
@@ -159,8 +214,13 @@ async def check_text_search_with_cache_warming(
     search_url = f"{target_base_url.rstrip('/')}/search"
     total_response_time = 0
     
-    # URL encode the artist name for the query
-    query = urllib.parse.quote_plus(artist_name.strip())
+    # Process artist name based on configuration options
+    processed_name = process_artist_name_for_text_search(
+        artist_name, convert_to_lowercase, remove_symbols_and_diacritics
+    )
+    
+    # URL encode the processed artist name for the query
+    query = urllib.parse.quote_plus(processed_name.strip())
     search_params = {"type": "all", "query": query}
     
     for attempt in range(max_attempts):
@@ -234,7 +294,18 @@ async def check_text_searches_concurrent_with_timing(
             global_position = offset + i + 1
             total_to_process = offset + len(to_check)
             
-            print(f"[{global_position}/{total_to_process}] Text search for {name} ...", end="", flush=True)
+            # Process the name to show what we're actually searching for
+            processed_name = process_artist_name_for_text_search(
+                name, 
+                cfg.get("artist_textsearch_lowercase", False), 
+                cfg.get("artist_textsearch_remove_symbols", False)
+            )
+            
+            # Better output format (original -> processed) only if they differ
+            if processed_name != name:
+                print(f"[{global_position}/{total_to_process}] Text search: '{name}' -> '{processed_name}' ...", end="", flush=True)
+            else:
+                print(f"[{global_position}/{total_to_process}] Text search for '{name}' ...", end="", flush=True)
             
             try:
                 status, last_code, attempts_used, response_time = await check_text_search_with_cache_warming(
@@ -243,7 +314,9 @@ async def check_text_searches_concurrent_with_timing(
                     cfg["target_base_url"],
                     cfg["max_attempts_per_artist_textsearch"],
                     cfg["delay_between_attempts"],
-                    cfg["timeout_seconds"]
+                    cfg["timeout_seconds"],
+                    cfg.get("artist_textsearch_lowercase", False),
+                    cfg.get("artist_textsearch_remove_symbols", False)
                 )
                 
                 rate_limiter.release(int(last_code) if last_code.isdigit() else last_code, response_time)
@@ -354,6 +427,17 @@ def process_text_search(to_check: List[str], ledger: Dict[str, Dict], cfg: dict,
     print(f"Processing {len(to_check)} artists for text search cache warming...")
     print(f"Settings: {cfg['max_attempts_per_artist_textsearch']} attempts, {cfg['delay_between_attempts']}s delay, "
           f"{cfg['max_concurrent_requests']} concurrent, {cfg['rate_limit_per_second']} req/sec")
+    
+    # Show text processing configuration if enabled
+    if cfg.get("artist_textsearch_lowercase", False) or cfg.get("artist_textsearch_remove_symbols", False):
+        processing_options = []
+        if cfg.get("artist_textsearch_lowercase", False):
+            processing_options.append("lowercase conversion")
+        if cfg.get("artist_textsearch_remove_symbols", False):
+            processing_options.append("symbol/diacritic removal")
+        print(f"Text processing: {', '.join(processing_options)}")
+    else:
+        print("Text processing: disabled (using original artist names)")
     
     try:
         if cfg.get("batch_size", 25) < len(to_check):

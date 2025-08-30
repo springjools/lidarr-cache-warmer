@@ -355,11 +355,11 @@ def create_storage_backend(cfg: dict) -> StorageBackend:
     storage_type = cfg.get("storage_type", "csv").lower()
     
     if storage_type == "sqlite":
-        return SQLiteStorage(cfg.get("db_path", "/data/mbid_cache.db"))
+        return SQLiteStorage(cfg.get("db_path", "mbid_cache.db"))
     elif storage_type == "csv":
         return CSVStorage(
-            cfg.get("artists_csv_path", "/data/mbid-artists.csv"),
-            cfg.get("release_groups_csv_path", "/data/mbid-releasegroups.csv")
+            cfg.get("artists_csv_path", "mbid-artists.csv"),
+            cfg.get("release_groups_csv_path", "mbid-releasegroups.csv")
         )
     else:
         raise ValueError(f"Unknown storage type: {storage_type}. Use 'csv' or 'sqlite'.")
