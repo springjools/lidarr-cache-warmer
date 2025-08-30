@@ -141,11 +141,11 @@ def print_stats_report(cfg: dict):
     # Fetch current Lidarr data for comparison
     try:
         print("📡 Fetching current data from Lidarr...")
-        lidarr_artists = get_lidarr_artists(cfg["lidarr_url"], cfg["api_key"])
+        lidarr_artists = get_lidarr_artists(cfg["lidarr_url"], cfg["api_key"], cfg.get("verify_ssl", True), cfg["lidarr_timeout"])
         lidarr_artist_count = len(lidarr_artists)
         
         if cfg.get("process_release_groups", False):
-            lidarr_rgs = get_lidarr_release_groups(cfg["lidarr_url"], cfg["api_key"])
+            lidarr_rgs = get_lidarr_release_groups(cfg["lidarr_url"], cfg["api_key"], cfg.get("verify_ssl", True), cfg["lidarr_timeout"])
             lidarr_rg_count = len(lidarr_rgs)
         else:
             lidarr_rg_count = 0
