@@ -4,7 +4,8 @@ import sys
 from datetime import datetime
 from typing import Dict
 
-from main import load_config, get_lidarr_artists, get_lidarr_release_groups
+from config import load_config, validate_config
+from main import get_lidarr_artists, get_lidarr_release_groups
 from storage import create_storage_backend
 
 
@@ -90,28 +91,34 @@ def format_config_summary(cfg: dict) -> str:
     
     config_lines = [
         "📋 Key Configuration Settings:",
+        f"   Connection & Security:",
+        f"     • lidarr_timeout: {cfg.get('lidarr_timeout', 60)}s",
+        f"     • verify_ssl: {cfg.get('verify_ssl', True)}",
         f"   API Rate Limiting:",
         f"     • max_concurrent_requests: {cfg.get('max_concurrent_requests', 5)}",
         f"     • rate_limit_per_second: {cfg.get('rate_limit_per_second', 3)}",
         f"     • delay_between_attempts: {cfg.get('delay_between_attempts', 0.5)}s",
         f"   Cache Warming Attempts:",
         f"     • max_attempts_per_artist: {cfg.get('max_attempts_per_artist', 25)}",
+        f"     • max_attempts_per_artist_textsearch: {cfg.get('max_attempts_per_artist_textsearch', 25)}",
         f"     • max_attempts_per_rg: {cfg.get('max_attempts_per_rg', 15)}",
         f"   Processing Options:",
         f"     • process_release_groups: {cfg.get('process_release_groups', False)}",
         f"     • process_artist_textsearch: {cfg.get('process_artist_textsearch', True)}",
-        f"     • text_search_delay: {cfg.get('text_search_delay', 0.2)}s",
         f"     • batch_size: {cfg.get('batch_size', 25)}",
+        f"   Text Search Processing:",
+        f"     • artist_textsearch_lowercase: {cfg.get('artist_textsearch_lowercase', False)}",
+        f"     • artist_textsearch_remove_symbols: {cfg.get('artist_textsearch_remove_symbols', False)}",
         f"   Storage Backend:",
         f"     • storage_type: {storage_type}",
     ]
     
     if storage_type == "sqlite":
-        config_lines.append(f"     • db_path: {cfg.get('db_path', '/data/mbid_cache.db')}")
+        config_lines.append(f"     • db_path: {cfg.get('db_path', 'mbid_cache.db')}")
     else:
         config_lines.extend([
-            f"     • artists_csv_path: {cfg.get('artists_csv_path', '/data/mbid-artists.csv')}",
-            f"     • release_groups_csv_path: {cfg.get('release_groups_csv_path', '/data/mbid-releasegroups.csv')}"
+            f"     • artists_csv_path: {cfg.get('artists_csv_path', 'mbid-artists.csv')}",
+            f"     • release_groups_csv_path: {cfg.get('release_groups_csv_path', 'mbid-releasegroups.csv')}"
         ])
     
     return "\n".join(config_lines)
@@ -141,11 +148,21 @@ def print_stats_report(cfg: dict):
     # Fetch current Lidarr data for comparison
     try:
         print("📡 Fetching current data from Lidarr...")
-        lidarr_artists = get_lidarr_artists(cfg["lidarr_url"], cfg["api_key"], cfg.get("verify_ssl", True), cfg["lidarr_timeout"])
+        lidarr_artists = get_lidarr_artists(
+            cfg["lidarr_url"], 
+            cfg["api_key"], 
+            cfg.get("verify_ssl", True),
+            cfg.get("lidarr_timeout", 60)
+        )
         lidarr_artist_count = len(lidarr_artists)
         
         if cfg.get("process_release_groups", False):
-            lidarr_rgs = get_lidarr_release_groups(cfg["lidarr_url"], cfg["api_key"], cfg.get("verify_ssl", True), cfg["lidarr_timeout"])
+            lidarr_rgs = get_lidarr_release_groups(
+                cfg["lidarr_url"], 
+                cfg["api_key"], 
+                cfg.get("verify_ssl", True),
+                cfg.get("lidarr_timeout", 60)
+            )
             lidarr_rg_count = len(lidarr_rgs)
         else:
             lidarr_rg_count = 0
@@ -243,6 +260,12 @@ def print_stats_report(cfg: dict):
     
     print()
     
+    # Connection health check
+    if not cfg.get("verify_ssl", True):
+        print("⚠️  SSL VERIFICATION: Disabled")
+        print("   WARNING: Only use this in trusted private networks")
+        print()
+    
     # Next steps recommendations
     print("🚀 RECOMMENDATIONS:")
     
@@ -270,7 +293,7 @@ def print_stats_report(cfg: dict):
     phases_enabled = []
     if artist_stats['pending'] > 0:
         phases_enabled.append("Phase 1: Artist MBID warming")
-    if cfg.get("enable_text_search_warming") and artist_stats['text_search_pending'] > 0:
+    if cfg.get("process_artist_textsearch") and artist_stats['text_search_pending'] > 0:
         phases_enabled.append("Phase 2: Text search warming")  
     if cfg.get("process_release_groups") and rg_stats.get('pending', 0) > 0:
         phases_enabled.append("Phase 3: Release group warming")
@@ -293,6 +316,14 @@ def main():
         cfg = load_config(args.config)
     except Exception as e:
         print(f"ERROR loading config: {e}", file=sys.stderr)
+        sys.exit(2)
+
+    # Validate configuration
+    config_issues = validate_config(cfg)
+    if config_issues:
+        print("Configuration issues found:", file=sys.stderr)
+        for issue in config_issues:
+            print(f"  - {issue}", file=sys.stderr)
         sys.exit(2)
 
     print_stats_report(cfg)
