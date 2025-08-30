@@ -4,6 +4,20 @@ Cache warming tool for **Lidarr** metadata. Fetches artist and release group MBI
 
 **Multi-phase processing**: Warms artist MBID cache first, then artist text search cache, then release group cache (each phase optional and configurable).
 
+## ⚠️ Various Artists Protection
+
+**The cache warmer automatically detects and removes "Various Artists" from your Lidarr library.** This artist (MBID: `89ad4ac3-39f7-470e-963a-56509c546377`) typically contains 100,000+ albums and causes severe performance issues.
+
+**Why this happens:** Lidarr has built-in protection to prevent adding Various Artists, but recent development changes occasionally allowed this artist to be added despite the protection. This cache warmer feature aligns with Lidarr's intended behavior by automatically removing Various Artists when detected.
+
+**What happens:** If detected, the cache warmer will:
+- 🚨 Alert you that Various Artists was found
+- 🛠️ Automatically remove the artist and all associated albums from Lidarr
+- 🚫 Add it to Lidarr's import exclusion list to prevent re-adding
+- ⏱️ Wait 30 seconds for deletion to complete before continuing
+
+This can dramatically improve performance for users experiencing timeout issues with large libraries.
+
 ## Requirements
 
 - **Lidarr instance** with API access
@@ -12,7 +26,7 @@ Cache warming tool for **Lidarr** metadata. Fetches artist and release group MBI
 
 ---
 
-## � Docker (Recommended)
+## 🐳 Docker (Recommended)
 
 ### Quick Start
 
@@ -58,20 +72,20 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
 # Run once (creates config.ini and data/ folder)
-python main.py --config config.ini
+python3 main.py --config config.ini
 
 # Edit config.ini with your Lidarr API key, then:
-python main.py --config config.ini
+python3 main.py --config config.ini
 
 # Or run on schedule:
-python entrypoint.py
+python3 entrypoint.py
 ```
 
 ---
 
 ## ⚙️ Configuration
 
-On first run, creates `config.ini` and `data/` folder with sensible defaults.
+On first run, creates `config.ini` with sensible defaults.
 **Edit the API key before restarting:**
 
 ```ini
@@ -83,9 +97,9 @@ lidarr_timeout = 60
 
 [ledger]
 storage_type = csv
-artists_csv_path = ./data/mbid-artists.csv
-release_groups_csv_path = ./data/mbid-releasegroups.csv
-db_path = ./data/mbid_cache.db
+artists_csv_path = mbid-artists.csv
+release_groups_csv_path = mbid-releasegroups.csv
+db_path = mbid_cache.db
 
 [run]
 process_artist_textsearch = true
@@ -99,15 +113,15 @@ artist_textsearch_remove_symbols = false
 | Parameter | Purpose | Default | Notes |
 |-----------|---------|---------|--------|
 | **Connection & Security** |
-| `lidarr_timeout` | Lidarr API request timeout (seconds) | `60` | **New!** Increase for large libraries (e.g., 120s) |
-| `verify_ssl` | Enable SSL certificate verification | `true` | **New!** Set `false` for self-signed certs |
+| `lidarr_timeout` | Lidarr API request timeout (seconds) | `60` | Increase for large libraries (e.g., 120s) |
+| `verify_ssl` | Enable SSL certificate verification | `true` | Set `false` for self-signed certs |
 | **Cache Warming Phases** |
 | `max_attempts_per_artist` | MBID retry limit for artists | `25` | Phase 1: Direct artist lookups |
 | `max_attempts_per_artist_textsearch` | Text search retry limit | `25` | Phase 2: Search-by-name warming |
 | `max_attempts_per_rg` | Retry limit for release groups | `15` | Phase 3: Album cache warming |
 | **Text Search Preprocessing** |
-| `artist_textsearch_lowercase` | Convert names to lowercase | `false` | **New!** e.g., "Metallica" → "metallica" |
-| `artist_textsearch_remove_symbols` | Remove diacritics & symbols | `false` | **New!** e.g., "Café Tacvba" → "Cafe Tacvba" |
+| `artist_textsearch_lowercase` | Convert names to lowercase | `false` | e.g., "Metallica" → "metallica" |
+| `artist_textsearch_remove_symbols` | Remove diacritics & symbols | `false` | e.g., "Café Tacvba" → "Cafe Tacvba" |
 | **Processing Control** |
 | `process_artist_textsearch` | Enable text search warming | `true` | Warms search-by-name cache |
 | `process_release_groups` | Enable release group warming | `false` | Depends on successful artists |
@@ -121,7 +135,7 @@ artist_textsearch_remove_symbols = false
 | `delay_between_attempts` | Wait between retries (seconds) | `0.5` | Prevents overwhelming API |
 | **Storage Backend** |
 | `storage_type` | Storage method | `csv` | `csv` or `sqlite` |
-| `db_path` | SQLite database location | `./data/mbid_cache.db` | **New path!** Used when `storage_type = sqlite` |
+| `db_path` | SQLite database location | `mbid_cache.db` | Used when `storage_type = sqlite` |
 
 ### Storage Recommendations
 
@@ -278,7 +292,7 @@ Progress: 50/200 (25.0%) - Rate: 3.8 searches/sec - ETC: 12:45 - API: 3.00 req/s
 docker run --rm -v $(pwd)/data:/app/data --entrypoint python ghcr.io/devianteng/lidarr-cache-warmer:latest /app/stats.py --config /app/data/config.ini
 
 # Manual Python installation
-python stats.py --config /data/config.ini
+python333 stats.py --config config.ini
 ```
 
 **Example Output:**
@@ -287,7 +301,7 @@ python stats.py --config /data/config.ini
 📋 Key Configuration Settings:
    • max_concurrent_requests: 5, rate_limit_per_second: 3
    • process_artist_textsearch: true, max_attempts_per_artist_textsearch: 25
-   • storage_type: sqlite, db_path: ./data/mbid_cache.db
+   • storage_type: sqlite, db_path: mbid_cache.db
 
 🎤 ARTIST MBID STATISTICS:
    ✅ Successfully cached: 1,156 (94.2%)
@@ -357,19 +371,19 @@ a8c1eb9a-2fb4-4f4f-8ada-62f30e27a1af:
 
 ---
 
-## 🔄 Recent Changes (Latest)
+## 📄 Recent Changes (Latest)
 
-### v1.5.0 Features
-- **🚀 Configurable Lidarr Timeout**: Added `lidarr_timeout` setting (default: 60s) to handle large libraries
-- **🔒 SSL Verification Control**: Added `verify_ssl` option for private CA certificates  
-- **🌍 Text Search Preprocessing**: Added `artist_textsearch_lowercase` and `artist_textsearch_remove_symbols` for international music
-- **📁 Improved File Organization**: All cache files now organized in `./data/` subdirectory
-- **⚡ Better Path Resolution**: Smart path handling for both Docker and manual installations
+### v1.6.0 Features
+- **🚨 Various Artists Protection**: Automatic detection and removal of problematic Various Artists
+- **⏱️ Smart Timing**: 30-second wait after Various Artists deletion to ensure proper cleanup
+- **🔧 Path Resolution Fix**: Corrected double `/data/data/` path issues in Docker environments
+- **📊 Enhanced Stats**: Updated statistics display with connection settings and text processing options
+- **🌐 Better SSL Support**: Improved handling of `verify_ssl` and `lidarr_timeout` in stats collection
 
 ### Migration Notes
-- **File paths updated**: Storage files now default to `./data/` instead of current directory
-- **Docker users**: No changes required - `/data` volume mount works the same
-- **Manual users**: Files now organized in clean `./data/` subdirectory
+- **File paths updated**: If upgrading, remove `./data/` prefixes from paths in your `config.ini`
+- **Docker users**: Update any hardcoded paths in custom configs
+- **Various Artists**: Will be automatically detected and removed on next run
 - **Large libraries**: Consider increasing `lidarr_timeout = 120` for 2000+ artists
 
 ---
