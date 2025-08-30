@@ -88,54 +88,9 @@ python3 entrypoint.py
 On first run, creates `config.ini` with sensible defaults.
 **Edit the API key before restarting:**
 
-```ini
-[lidarr]
-base_url = http://192.168.1.103:8686
-api_key  = YOUR_LIDARR_API_KEY
-verify_ssl = true
-lidarr_timeout = 60
+### Config options
 
-[ledger]
-storage_type = csv
-artists_csv_path = mbid-artists.csv
-release_groups_csv_path = mbid-releasegroups.csv
-db_path = mbid_cache.db
-
-[run]
-process_artist_textsearch = true
-process_release_groups = false
-artist_textsearch_lowercase = false
-artist_textsearch_remove_symbols = false
-```
-
-### Key Settings
-
-| Parameter | Purpose | Default | Notes |
-|-----------|---------|---------|--------|
-| **Connection & Security** |
-| `lidarr_timeout` | Lidarr API request timeout (seconds) | `60` | Increase for large libraries (e.g., 120s) |
-| `verify_ssl` | Enable SSL certificate verification | `true` | Set `false` for self-signed certs |
-| **Cache Warming Phases** |
-| `max_attempts_per_artist` | MBID retry limit for artists | `25` | Phase 1: Direct artist lookups |
-| `max_attempts_per_artist_textsearch` | Text search retry limit | `25` | Phase 2: Search-by-name warming |
-| `max_attempts_per_rg` | Retry limit for release groups | `15` | Phase 3: Album cache warming |
-| **Text Search Preprocessing** |
-| `artist_textsearch_lowercase` | Convert names to lowercase | `false` | e.g., "Metallica" → "metallica" |
-| `artist_textsearch_remove_symbols` | Remove diacritics & symbols | `false` | e.g., "Café Tacvba" → "Cafe Tacvba" |
-| **Processing Control** |
-| `process_artist_textsearch` | Enable text search warming | `true` | Warms search-by-name cache |
-| `process_release_groups` | Enable release group warming | `false` | Depends on successful artists |
-| **Force Refresh Options** |
-| `force_artists` | Re-check successful artists | `false` | Sets attempts to 1 for discovery |
-| `force_text_search` | Re-check successful searches | `false` | Re-warms search cache |
-| `force_rg` | Re-check successful release groups | `false` | Sets attempts to 1 for discovery |
-| **API Politeness** |
-| `max_concurrent_requests` | Simultaneous requests | `5` | Higher = faster, but more API load |
-| `rate_limit_per_second` | Max API calls per second | `3` | **Primary safety valve** |
-| `delay_between_attempts` | Wait between retries (seconds) | `0.5` | Prevents overwhelming API |
-| **Storage Backend** |
-| `storage_type` | Storage method | `csv` | `csv` or `sqlite` |
-| `db_path` | SQLite database location | `mbid_cache.db` | Used when `storage_type = sqlite` |
+View [config.ini.example](config.ini.example) for available options, or to pre-create your config.
 
 ### Storage Recommendations
 
@@ -143,7 +98,6 @@ artist_textsearch_remove_symbols = false
 |--------------|-------------------|-----|
 | < 2,000 artists | `storage_type = csv` | Simple, human-readable files |
 | > 2,000 artists | `storage_type = sqlite` | **Much faster**, indexed queries, atomic updates |
-| > 10,000 entities | `storage_type = sqlite` | **Essential** for reasonable performance |
 
 **SQLite Benefits:** 30MB+ CSV becomes ~1MB database, 100x faster updates, no file corruption risk, optimized text search tracking.
 
