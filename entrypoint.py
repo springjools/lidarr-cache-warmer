@@ -27,9 +27,6 @@ def main():
     raw_cfg = os.environ.get("CONFIG_PATH", "/app/data/config.ini")
     config_path = raw_cfg if os.path.isabs(raw_cfg) else os.path.abspath(raw_cfg)
 
-    # Helpful debug so you can see exactly what's happening at runtime
-    print(f"[entrypoint] CWD={os.getcwd()} CONFIG_PATH_RAW={raw_cfg} CONFIG_PATH={config_path}", flush=True)
-
     # If config is missing, create and exit so the user can fill it in
     cfg_dir = os.path.dirname(config_path) or "."
     if not os.path.exists(config_path):

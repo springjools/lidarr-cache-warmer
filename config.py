@@ -43,11 +43,11 @@ max_backoff_seconds = 15
 storage_type = csv
 
 # CSV file paths (used when storage_type = csv)
-artists_csv_path = ./data/mbid-artists.csv
-release_groups_csv_path = ./data/mbid-releasegroups.csv
+artists_csv_path = ./mbid-artists.csv
+release_groups_csv_path = ./mbid-releasegroups.csv
 
 # SQLite database path (used when storage_type = sqlite)
-db_path = ./data/mbid_cache.db
+db_path = ./mbid_cache.db
 
 [run]
 # Processing control - enable/disable each phase
@@ -66,7 +66,7 @@ artist_textsearch_remove_symbols = false
 
 [manual]
 # Manual entry injection from YAML file
-manual_entries_file = ./data/manual_entries.yml
+manual_entries_file = ./manual_entries.yml
 
 [actions]
 # If true, when a probe transitions from (no status or timeout) -> success,
@@ -137,7 +137,7 @@ def load_config(path: str) -> dict:
     if not cp.read(path, encoding="utf-8"):
         raise FileNotFoundError(f"Config file not found or unreadable: {path}")
 
-    # Determine base directory for relative paths
+    # Use config file's directory as base for relative paths
     config_dir = os.path.dirname(os.path.abspath(path))
     
     # Helper function to resolve paths (absolute paths pass through, relative paths use config directory)
@@ -145,9 +145,12 @@ def load_config(path: str) -> dict:
         path_value = config_path if config_path else default_path
         if os.path.isabs(path_value):
             return path_value
+        # For relative paths starting with ./, remove the ./ and join with config_dir
+        if path_value.startswith('./'):
+            path_value = path_value[2:]
         return os.path.join(config_dir, path_value)
 
-    # Load configuration with new structure
+    # Load configuration with corrected path resolution
     cfg = {
         # Core settings
         "lidarr_url": cp.get("lidarr", "base_url", fallback="http://192.168.1.103:8686"),
@@ -161,15 +164,15 @@ def load_config(path: str) -> dict:
         "storage_type": cp.get("ledger", "storage_type", fallback="csv"),
         "artists_csv_path": resolve_path(
             cp.get("ledger", "artists_csv_path", fallback=""),
-            "./data/mbid-artists.csv"
+            "mbid-artists.csv"  # Changed from ./data/mbid-artists.csv
         ),
         "release_groups_csv_path": resolve_path(
             cp.get("ledger", "release_groups_csv_path", fallback=""),
-            "./data/mbid-releasegroups.csv"
+            "mbid-releasegroups.csv"  # Changed from ./data/mbid-releasegroups.csv
         ),
         "db_path": resolve_path(
             cp.get("ledger", "db_path", fallback=""),
-            "./data/mbid_cache.db"
+            "mbid_cache.db"  # Changed from ./data/mbid_cache.db
         ),
         
         # Processing control
@@ -188,7 +191,7 @@ def load_config(path: str) -> dict:
         # Manual entries with path resolution
         "manual_entries_file": resolve_path(
             cp.get("manual", "manual_entries_file", fallback=""),
-            "./data/manual_entries.yml"
+            "manual_entries.yml"  # Changed from ./data/manual_entries.yml
         ),
         
         # Shared API settings

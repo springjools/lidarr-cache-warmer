@@ -40,12 +40,12 @@ max_backoff_seconds = 15
 storage_type = csv
 
 # CSV file paths (used when storage_type = csv)
-# Paths can be absolute (/path/to/file) or relative to config file location (./file)
-artists_csv_path = ./data/mbid-artists.csv
-release_groups_csv_path = ./data/mbid-releasegroups.csv
+# Paths can be absolute (/path/to/file) or relative to config file location (filename or ./filename)
+artists_csv_path = mbid-artists.csv
+release_groups_csv_path = mbid-releasegroups.csv
 
 # SQLite database path (used when storage_type = sqlite)
-db_path = ./data/mbid_cache.db
+db_path = mbid_cache.db
 
 [run]
 # Phase 0.2: Manual entry injection from YAML file
@@ -78,7 +78,7 @@ artist_textsearch_remove_symbols = true
 [manual]
 # Manual entry injection settings (used when process_manual_entries = true)
 # Path to YAML file containing manual artist/release group entries
-manual_entries_file = ./data/manual_entries.yml
+manual_entries_file = manual_entries.yml
 
 [schedule]
 # Scheduler settings (used by entrypoint.py for continuous operation)
