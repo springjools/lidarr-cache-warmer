@@ -12,7 +12,7 @@ Cache warming tool for **Lidarr** metadata. Fetches artist and release group MBI
 
 ---
 
-## 🐳 Docker (Recommended)
+## � Docker (Recommended)
 
 ### Quick Start
 
@@ -21,13 +21,13 @@ Cache warming tool for **Lidarr** metadata. Fetches artist and release group MBI
 mkdir -p ./data
 
 # Run container (creates config.ini and exits)
-docker run --rm -v $(pwd)/data:/data ghcr.io/devianteng/lidarr-cache-warmer:latest
+docker run --rm -v $(pwd)/data:/app/data ghcr.io/devianteng/lidarr-cache-warmer:latest
 
 # Edit config with your Lidarr API key
 nano ./data/config.ini
 
 # Run the cache warmer
-docker run -d --name lidarr-cache-warmer -v $(pwd)/data:/data ghcr.io/devianteng/lidarr-cache-warmer:latest
+docker run -d --name lidarr-cache-warmer -v $(pwd)/data:/app/data ghcr.io/devianteng/lidarr-cache-warmer:latest
 
 # Monitor logs
 docker logs -f lidarr-cache-warmer
@@ -42,7 +42,7 @@ services:
     container_name: lidarr-cache-warmer
     restart: unless-stopped
     volumes:
-      - ./data:/data
+      - ./data:/app/data
 ```
 
 ---
@@ -57,7 +57,7 @@ python3 -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-# Run once (creates config.ini)
+# Run once (creates config.ini and data/ folder)
 python main.py --config config.ini
 
 # Edit config.ini with your Lidarr API key, then:
@@ -71,26 +71,43 @@ python entrypoint.py
 
 ## ⚙️ Configuration
 
-On first run, creates `/data/config.ini`.  Full config options can be seen in config.ini.example.
+On first run, creates `config.ini` and `data/` folder with sensible defaults.
 **Edit the API key before restarting:**
 
 ```ini
 [lidarr]
 base_url = http://192.168.1.103:8686
 api_key  = YOUR_LIDARR_API_KEY
+verify_ssl = true
+lidarr_timeout = 60
 
-[...]
+[ledger]
+storage_type = csv
+artists_csv_path = ./data/mbid-artists.csv
+release_groups_csv_path = ./data/mbid-releasegroups.csv
+db_path = ./data/mbid_cache.db
+
+[run]
+process_artist_textsearch = true
+process_release_groups = false
+artist_textsearch_lowercase = false
+artist_textsearch_remove_symbols = false
 ```
-
 
 ### Key Settings
 
 | Parameter | Purpose | Default | Notes |
 |-----------|---------|---------|--------|
+| **Connection & Security** |
+| `lidarr_timeout` | Lidarr API request timeout (seconds) | `60` | **New!** Increase for large libraries (e.g., 120s) |
+| `verify_ssl` | Enable SSL certificate verification | `true` | **New!** Set `false` for self-signed certs |
 | **Cache Warming Phases** |
 | `max_attempts_per_artist` | MBID retry limit for artists | `25` | Phase 1: Direct artist lookups |
 | `max_attempts_per_artist_textsearch` | Text search retry limit | `25` | Phase 2: Search-by-name warming |
 | `max_attempts_per_rg` | Retry limit for release groups | `15` | Phase 3: Album cache warming |
+| **Text Search Preprocessing** |
+| `artist_textsearch_lowercase` | Convert names to lowercase | `false` | **New!** e.g., "Metallica" → "metallica" |
+| `artist_textsearch_remove_symbols` | Remove diacritics & symbols | `false` | **New!** e.g., "Café Tacvba" → "Cafe Tacvba" |
 | **Processing Control** |
 | `process_artist_textsearch` | Enable text search warming | `true` | Warms search-by-name cache |
 | `process_release_groups` | Enable release group warming | `false` | Depends on successful artists |
@@ -104,7 +121,7 @@ api_key  = YOUR_LIDARR_API_KEY
 | `delay_between_attempts` | Wait between retries (seconds) | `0.5` | Prevents overwhelming API |
 | **Storage Backend** |
 | `storage_type` | Storage method | `csv` | `csv` or `sqlite` |
-| `db_path` | SQLite database location | `/data/mbid_cache.db` | Used when `storage_type = sqlite` |
+| `db_path` | SQLite database location | `./data/mbid_cache.db` | **New path!** Used when `storage_type = sqlite` |
 
 ### Storage Recommendations
 
@@ -115,6 +132,71 @@ api_key  = YOUR_LIDARR_API_KEY
 | > 10,000 entities | `storage_type = sqlite` | **Essential** for reasonable performance |
 
 **SQLite Benefits:** 30MB+ CSV becomes ~1MB database, 100x faster updates, no file corruption risk, optimized text search tracking.
+
+### File Organization
+
+**Docker:**
+```
+/app/data/               # Mounted from host ./data/
+├── config.ini           # Your configuration
+├── mbid-artists.csv     # Artist cache status
+├── mbid_cache.db        # SQLite database (if enabled)
+└── results_*.log        # Run results
+```
+
+**Manual Installation:**
+```
+your-project/
+├── config.ini           # Your configuration
+├── main.py              # Application files
+├── process_*.py
+└── data/                # Auto-created cache directory
+    ├── mbid-artists.csv
+    ├── mbid_cache.db
+    └── results_*.log
+```
+
+---
+
+## 🔧 Common Configuration Scenarios
+
+### Large Libraries (2000+ Artists)
+```ini
+[lidarr]
+lidarr_timeout = 120        # Longer timeout for large datasets
+verify_ssl = true
+
+[ledger]
+storage_type = sqlite       # Much faster for large libraries
+
+[run]
+batch_size = 50            # Larger batches for efficiency
+```
+
+### Private CA / Self-Signed Certificates
+```ini
+[lidarr]
+verify_ssl = false         # Disable SSL verification
+# WARNING: Only use in trusted private networks
+```
+
+### International Music Libraries
+```ini
+[run]
+artist_textsearch_lowercase = true        # Better search matching
+artist_textsearch_remove_symbols = true  # Handle diacritics (é, ñ, ü)
+```
+
+### High-Performance Setup
+```ini
+[probe]
+max_concurrent_requests = 10
+rate_limit_per_second = 8
+
+[run]
+batch_size = 50
+batch_write_frequency = 10
+```
 
 ---
 
@@ -146,6 +228,7 @@ The tool operates in up to three distinct phases, each targeting different API c
 - **When**: After Phase 1, for all artists with names
 - **Retry Logic**: Up to 25 attempts per text search by default
 - **Benefits**: Faster response times for user searches in Lidarr
+- **Text Processing**: Can normalize international characters and symbols
 - **Output**: Updates `text_search_attempted` and `text_search_success` flags
 
 #### Phase 3: Release Group Cache Warming (Optional, Default: Disabled)
@@ -167,14 +250,16 @@ On first run (no existing storage), the tool automatically enables **discovery m
 🔍 First run detected - no existing storage found
    Enabling force modes for initial cache discovery (1 attempt per entity)
 
+Lidarr API timeout: 60 seconds
 === Phase 1: Artist MBID Cache Warming ===
 [1/25] Checking Artist Name [mbid] ... SUCCESS (code=200, attempts=1)  # Already cached!
 [2/25] Checking Another Artist [mbid] ... TIMEOUT (code=503, attempts=1)  # Needs warming
 Progress: 50/250 (20.0%) - Rate: 4.2 artists/sec - ETC: 14:32 - API: 3.00 req/sec - Batch: 20/25 success
 
 === Phase 2: Artist Text Search Cache Warming ===
-[1/25] Text search for Metallica ... SUCCESS (code=200, attempts=1)
-[2/25] Text search for Bob Dylan ... TIMEOUT (code=503, attempts=1)
+Text processing: symbol/diacritic removal, lowercase conversion
+[1/25] Text search: 'Sigur Rós' -> 'sigur ros' ... SUCCESS (code=200, attempts=1)
+[2/25] Text search for 'Bob Dylan' ... TIMEOUT (code=503, attempts=1)
 Progress: 50/200 (25.0%) - Rate: 3.8 searches/sec - ETC: 12:45 - API: 3.00 req/sec - Batch: 12/25 success
 
 === Phase 3: Release Group Cache Warming ===
@@ -190,7 +275,7 @@ Progress: 50/200 (25.0%) - Rate: 3.8 searches/sec - ETC: 12:45 - API: 3.00 req/s
 ### View Current Stats
 ```bash
 # Get comprehensive overview with Docker
-docker run --rm -v $(pwd)/data:/data --entrypoint python ghcr.io/devianteng/lidarr-cache-warmer:latest /app/stats.py --config /data/config.ini
+docker run --rm -v $(pwd)/data:/app/data --entrypoint python ghcr.io/devianteng/lidarr-cache-warmer:latest /app/stats.py --config /app/data/config.ini
 
 # Manual Python installation
 python stats.py --config /data/config.ini
@@ -202,7 +287,7 @@ python stats.py --config /data/config.ini
 📋 Key Configuration Settings:
    • max_concurrent_requests: 5, rate_limit_per_second: 3
    • process_artist_textsearch: true, max_attempts_per_artist_textsearch: 25
-   • storage_type: sqlite, db_path: /data/mbid_cache.db
+   • storage_type: sqlite, db_path: ./data/mbid_cache.db
 
 🎤 ARTIST MBID STATISTICS:
    ✅ Successfully cached: 1,156 (94.2%)
@@ -244,10 +329,13 @@ Cache warming is perfect for APIs where:
 ### Text Search Cache Warming Strategy
 The text search feature specifically targets the search-by-name cache system:
 
-1. **URL Encoding**: Properly handles special characters in artist names
-2. **Query Format**: Uses `?type=all&query={artist_name}` format for comprehensive results
-3. **Cache Building**: Retries 503 responses as the search index builds
-4. **Success Tracking**: Records both attempt status and success status for analytics
+1. **Text Preprocessing**: Configurable normalization for international artists
+   - **Lowercase conversion**: "Metallica" → "metallica" 
+   - **Symbol/diacritic removal**: "Sigur Rós" → "sigur ros", "Café Tacvba" → "cafe tacvba"
+2. **URL Encoding**: Properly handles special characters in artist names
+3. **Query Format**: Uses `?type=all&query={artist_name}` format for comprehensive results
+4. **Cache Building**: Retries 503 responses as the search index builds
+5. **Success Tracking**: Records both attempt status and success status for analytics
 
 This approach minimizes wasted effort and focuses cache warming where it provides maximum user benefit.
 
@@ -255,7 +343,7 @@ This approach minimizes wasted effort and focuses cache warming where it provide
 
 ## 🔧 Manual Entry YAML example (manual_entries.yml)
 
-```
+```yaml
 6ae6a016-91d7-46cc-be7d-5e8e5d320c54:
   name: Adelitas Way
   release-groups:
@@ -266,6 +354,23 @@ a8c1eb9a-2fb4-4f4f-8ada-62f30e27a1af:
   name: Artemis Rising
   # No release-groups needed
 ```
+
+---
+
+## 🔄 Recent Changes (Latest)
+
+### v1.5.0 Features
+- **🚀 Configurable Lidarr Timeout**: Added `lidarr_timeout` setting (default: 60s) to handle large libraries
+- **🔒 SSL Verification Control**: Added `verify_ssl` option for private CA certificates  
+- **🌍 Text Search Preprocessing**: Added `artist_textsearch_lowercase` and `artist_textsearch_remove_symbols` for international music
+- **📁 Improved File Organization**: All cache files now organized in `./data/` subdirectory
+- **⚡ Better Path Resolution**: Smart path handling for both Docker and manual installations
+
+### Migration Notes
+- **File paths updated**: Storage files now default to `./data/` instead of current directory
+- **Docker users**: No changes required - `/data` volume mount works the same
+- **Manual users**: Files now organized in clean `./data/` subdirectory
+- **Large libraries**: Consider increasing `lidarr_timeout = 120` for 2000+ artists
 
 ---
 
