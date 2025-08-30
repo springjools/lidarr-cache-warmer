@@ -24,7 +24,7 @@ def parse_bool(s: str, default: bool = False) -> bool:
 
 def main():
     # Allow overriding the config path via env var, default to ./data/config.ini (resolves to /app/data/config.ini in container)
-    config_path = os.environ.get("CONFIG_PATH", "./data/config.ini")
+    config_path = os.environ.get("CONFIG_PATH", "/app/data/config.ini")
 
     # If config is missing, create and exit so the user can fill in the API key.
     if not os.path.exists(config_path):
