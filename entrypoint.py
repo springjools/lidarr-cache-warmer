@@ -23,8 +23,8 @@ def parse_bool(s: str, default: bool = False) -> bool:
     return s.strip().lower() in ("1", "true", "yes", "on")
 
 def main():
-    # Allow overriding the config path via env var, default to /data/config.ini
-    config_path = os.environ.get("CONFIG_PATH", "/data/config.ini")
+    # Allow overriding the config path via env var, default to ./data/config.ini
+    config_path = os.environ.get("CONFIG_PATH", "./data/config.ini")
 
     # If config is missing, create and exit so the user can fill in the API key.
     if not os.path.exists(config_path):
