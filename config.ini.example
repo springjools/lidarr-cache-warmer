@@ -75,6 +75,11 @@ artist_textsearch_lowercase = true
 # Remove symbols and diacritics from artist names (e.g., Café Tacvba -> Cafe Tacvba)
 artist_textsearch_remove_symbols = true
 
+# Cache freshness settings
+# Re-check successful cache entries after this many hours (default: 72)
+# Set to 0 to disable automatic re-checking of successful entries
+cache_recheck_hours = 72
+
 [manual]
 # Manual entry injection settings (used when process_manual_entries = true)
 # Path to YAML file containing manual artist/release group entries
