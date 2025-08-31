@@ -367,9 +367,9 @@ def process_artists_in_batches(
     for batch_idx in range(0, len(to_check), batch_size):
         batch_num = batch_idx // batch_size + 1
         batch = to_check[batch_idx:batch_idx + batch_size]
-        
-        print(f"=== Artists Batch {bcolors.OKCYAN}{batch_num}/{total_batches} ({len(batch)} artists){bcolors.ENDC} ===")
-        
+
+        print(f"=== Artists Batch {bcolors.BWHITE}{batch_num}/{total_batches} ({len(batch)} artists){bcolors.ENDC} ===")
+
         batch_transitioned, batch_successes, batch_failures = asyncio.run(
             check_artists_concurrent_with_timing(batch, ledger, cfg, storage, overall_start_time, total_processed)
         )

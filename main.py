@@ -110,16 +110,16 @@ def remove_various_artists_from_lidarr(base_url: str, api_key: str, artist_id: i
     """Remove Various Artists and all its albums from Lidarr"""
     session = requests.Session()
     headers = {"X-Api-Key": api_key}
-    
+
     # Configure SSL verification
     session.verify = verify_ssl
     if not verify_ssl:
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-    
+
     # Try different API endpoints for artist deletion
     endpoints = ["/api/v1/artist", "/api/artist", "/api/v3/artist"]
-    
+
     for endpoint in endpoints:
         url = f"{base_url.rstrip('/')}{endpoint}/{artist_id}"
         try:
@@ -133,7 +133,7 @@ def remove_various_artists_from_lidarr(base_url: str, api_key: str, artist_id: i
         except Exception as e:
             print(f"   ⚠️  Error deleting via {endpoint}: {e}")
             continue
-    
+
     print(f"   ❌ Failed to remove Various Artists from all API endpoints")
     return False
 
@@ -144,12 +144,12 @@ def check_and_handle_various_artists(artists: List[Dict], cfg: dict) -> tuple[Li
     Returns (filtered_artists_list_without_various_artists, various_artists_detected).
     """
     VARIOUS_ARTISTS_MBID = "89ad4ac3-39f7-470e-963a-56509c546377"
-    
+
     # Find Various Artists in the list
     various_artists_entry = None
     filtered_artists = []
     various_artists_detected = False
-    
+
     for artist in artists:
         if artist["mbid"] == VARIOUS_ARTISTS_MBID:
             various_artists_entry = artist
@@ -161,7 +161,7 @@ def check_and_handle_various_artists(artists: List[Dict], cfg: dict) -> tuple[Li
             print(f"   Various Artists and its albums will be excluded from all processing")
         else:
             filtered_artists.append(artist)
-    
+
     if various_artists_detected:
         albums_count = "unknown number of"
         try:
@@ -171,30 +171,30 @@ def check_and_handle_various_artists(artists: List[Dict], cfg: dict) -> tuple[Li
             print(f"📊 Various Artists typically contains 100,000+ albums")
         except:
             pass
-        
+
         print(f"✅ Various Artists filtered out - will not impact cache warming performance")
         print(f"   Cache warming will process {len(filtered_artists)} other artists")
-    
+
     return filtered_artists, various_artists_detected
 
 
 def filter_release_groups_by_artist(release_groups: List[Dict], allowed_artist_mbids: set) -> List[Dict]:
     """Filter out release groups from excluded artists (like Various Artists)"""
     VARIOUS_ARTISTS_MBID = "89ad4ac3-39f7-470e-963a-56509c546377"
-    
+
     filtered_rgs = []
     excluded_count = 0
-    
+
     for rg in release_groups:
         artist_mbid = rg.get("artist_mbid", "")
         if artist_mbid == VARIOUS_ARTISTS_MBID:
             excluded_count += 1
         elif artist_mbid in allowed_artist_mbids:
             filtered_rgs.append(rg)
-    
+
     if excluded_count > 0:
         print(f"🚫 Excluded {excluded_count:,} release groups from Various Artists")
-    
+
     return filtered_rgs
 
 
@@ -229,17 +229,17 @@ def is_stale(last_checked: str, recheck_hours: int) -> bool:
     """Check if a cache entry is stale based on last_checked timestamp and recheck hours"""
     if recheck_hours <= 0:
         return False  # Recheck disabled
-    
+
     if not last_checked:
         return True  # Never checked = stale
-    
+
     try:
         # Parse ISO timestamp (handles both with/without timezone)
         if last_checked.endswith('Z'):
             last_checked = last_checked[:-1] + '+00:00'
         elif '+' not in last_checked and 'T' in last_checked:
             last_checked += '+00:00'
-        
+
         last_time = datetime.fromisoformat(last_checked)
         now = datetime.now(timezone.utc)
         hours_since = (now - last_time).total_seconds() / 3600
@@ -375,14 +375,14 @@ def main():
             if various_artists_deleted:
                 print("⏱️  Waiting 30 seconds for Lidarr to complete Various Artists deletion...")
                 time.sleep(30)
-            
+
             print("Fetching release groups from Lidarr...")
             release_groups = get_lidarr_release_groups(cfg["lidarr_url"], cfg["api_key"], cfg.get("verify_ssl", True), cfg["lidarr_timeout"])
-            
+
             # *** NEW: Filter out release groups from Various Artists ***
             allowed_artist_mbids = {artist["mbid"] for artist in artists}
             release_groups = filter_release_groups_by_artist(release_groups, allowed_artist_mbids)
-            
+
             print(f"✅ Found {len(release_groups)} release groups in Lidarr (after filtering)")
         else:
             release_groups = []
@@ -506,13 +506,13 @@ def main():
         if len(artists_to_check) > 0:
             # Show breakdown of why artists are being checked
             force_count = sum(1 for mbid in artists_to_check if cfg["force_artists"])
-            pending_count = sum(1 for mbid in artists_to_check 
+            pending_count = sum(1 for mbid in artists_to_check
                                if mbid in artists_ledger and artists_ledger[mbid].get("status", "").lower() not in ("success",))
-            stale_count = sum(1 for mbid in artists_to_check 
-                             if mbid in artists_ledger and 
+            stale_count = sum(1 for mbid in artists_to_check
+                             if mbid in artists_ledger and
                                 artists_ledger[mbid].get("status", "").lower() == "success" and
                                 is_stale(artists_ledger[mbid].get("last_checked", ""), cfg["cache_recheck_hours"]))
-            
+
             print(f"Will process {len(artists_to_check)} artists for MBID cache warming")
             if force_count > 0:
                 print(f"   - {force_count} forced re-checks")
@@ -520,7 +520,7 @@ def main():
                 print(f"   - {pending_count} pending/failed artists")
             if stale_count > 0:
                 print(f"   - {stale_count} stale entries (older than {cfg['cache_recheck_hours']} hours)")
-            
+
             artist_results = process_artists(artists_to_check, artists_ledger, cfg, storage)
             print(f"Artist MBID warming complete: {artist_results}")
         else:
@@ -552,13 +552,13 @@ def main():
             if len(text_search_to_check) > 0:
                 # Show breakdown of text search reasons
                 force_count = sum(1 for mbid in text_search_to_check if cfg["force_text_search"])
-                pending_count = sum(1 for mbid in text_search_to_check 
+                pending_count = sum(1 for mbid in text_search_to_check
                                    if mbid in artists_ledger and not artists_ledger[mbid].get("text_search_success", False))
-                stale_count = sum(1 for mbid in text_search_to_check 
-                                 if mbid in artists_ledger and 
+                stale_count = sum(1 for mbid in text_search_to_check
+                                 if mbid in artists_ledger and
                                     artists_ledger[mbid].get("text_search_success", False) and
                                     is_stale(artists_ledger[mbid].get("text_search_last_checked", ""), cfg["cache_recheck_hours"]))
-                
+
                 print(f"Will process {len(text_search_to_check)} artists for text search cache warming")
                 if force_count > 0:
                     print(f"   - {force_count} forced re-checks")
@@ -566,7 +566,7 @@ def main():
                     print(f"   - {pending_count} pending/failed text searches")
                 if stale_count > 0:
                     print(f"   - {stale_count} stale text searches (older than {cfg['cache_recheck_hours']} hours)")
-                
+
                 text_search_results = process_text_search(text_search_to_check, artists_ledger, cfg, storage)
                 print(f"Text search warming complete: {text_search_results}")
             else:
@@ -612,13 +612,13 @@ def main():
             if len(rgs_to_check) > 0:
                 # Show breakdown of release group reasons
                 force_count = sum(1 for rg_mbid in rgs_to_check if cfg["force_rg"])
-                pending_count = sum(1 for rg_mbid in rgs_to_check 
+                pending_count = sum(1 for rg_mbid in rgs_to_check
                                    if rg_mbid in rg_ledger and rg_ledger[rg_mbid].get("status", "").lower() not in ("success",))
-                stale_count = sum(1 for rg_mbid in rgs_to_check 
-                                 if rg_mbid in rg_ledger and 
+                stale_count = sum(1 for rg_mbid in rgs_to_check
+                                 if rg_mbid in rg_ledger and
                                     rg_ledger[rg_mbid].get("status", "").lower() == "success" and
                                     is_stale(rg_ledger[rg_mbid].get("last_checked", ""), cfg["cache_recheck_hours"]))
-                
+
                 print(f"Will process {len(rgs_to_check)} release groups (from successfully cached artists)")
                 if force_count > 0:
                     print(f"   - {force_count} forced re-checks")
@@ -626,7 +626,7 @@ def main():
                     print(f"   - {pending_count} pending/failed release groups")
                 if stale_count > 0:
                     print(f"   - {stale_count} stale entries (older than {cfg['cache_recheck_hours']} hours)")
-                
+
                 rg_results = process_release_groups(rgs_to_check, rg_ledger, cfg, storage)
                 print(f"Release groups phase complete: {rg_results}")
             else:

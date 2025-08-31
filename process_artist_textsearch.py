@@ -397,7 +397,7 @@ def process_text_searches_in_batches(
     for batch_idx in range(0, len(to_check), batch_size):
         batch_num = batch_idx // batch_size + 1
         batch = to_check[batch_idx:batch_idx + batch_size]
-                
+
         print(f"=== Text Search Batch {bcolors.OKCYAN}{batch_num}/{total_batches} ({len(batch)} artists){bcolors.ENDC} ===")
 
         batch_successes, batch_attempts = asyncio.run(
