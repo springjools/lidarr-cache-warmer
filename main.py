@@ -10,6 +10,7 @@ import requests
 from config import load_config, validate_config
 from storage import create_storage_backend, iso_now
 from process_manual_entries import process_manual_entries
+from colors import Colors
 
 
 def get_lidarr_artists(base_url: str, api_key: str, verify_ssl: bool = True, timeout: int = 60) -> List[Dict]:
@@ -516,7 +517,7 @@ def main():
         return
 
     # Phase 1: Process Artists (MBID Cache Warming)
-    print(f"\n=== Phase 1: Artist MBID Cache Warming ===")
+    print(f"\n{Colors.bold('=== Phase 1: Artist MBID Cache Warming ===', cfg.get('colored_output', True))}")
     
     # Import and run artist processing
     try:

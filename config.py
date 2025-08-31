@@ -67,6 +67,9 @@ artist_textsearch_remove_symbols = false
 # Cache freshness settings
 cache_recheck_hours = 72
 
+# Output formatting
+colored_output = true
+
 [manual]
 # Manual entry injection from YAML file
 manual_entries_file = ./manual_entries.yml
@@ -218,6 +221,9 @@ def load_config(path: str) -> dict:
         
         # Cache freshness settings
         "cache_recheck_hours": cp.getint("run", "cache_recheck_hours", fallback=72),
+        
+        # Output formatting settings
+        "colored_output": parse_bool(cp.get("run", "colored_output", fallback="true")),
         
         # Monitoring options
         "log_progress_every_n": cp.getint("monitoring", "log_progress_every_n", fallback=25),
