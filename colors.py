@@ -31,21 +31,29 @@ class Colors:
     @classmethod
     def is_supported(cls) -> bool:
         """Check if terminal supports ANSI colors"""
+        # Force enable colors in Docker containers (common case)
+        if os.environ.get('container') or os.path.exists('/.dockerenv'):
+            return True
+        
         # Check if we're in a TTY (not redirected to file)
         if not sys.stdout.isatty():
             return False
         
-        # Check common environment variables
+        # Check common environment variables that force color
+        if any(env in os.environ for env in ['COLORTERM', 'FORCE_COLOR']):
+            return True
+        
+        # Check if colors are explicitly disabled
+        if os.environ.get('NO_COLOR'):
+            return False
+        
+        # Check terminal type
         term = os.environ.get('TERM', '').lower()
         if term in ('dumb', ''):
             return False
         
-        # Check if we're in a known color-supporting environment
-        if any(env in os.environ for env in ['COLORTERM', 'FORCE_COLOR']):
-            return True
-        
         # Common terminals that support color
-        color_terms = ['xterm', 'screen', 'tmux', 'linux', 'ansi']
+        color_terms = ['xterm', 'screen', 'tmux', 'linux', 'ansi', 'color']
         return any(color_term in term for color_term in color_terms)
     
     @classmethod
