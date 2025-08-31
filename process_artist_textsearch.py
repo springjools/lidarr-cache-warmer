@@ -12,6 +12,8 @@ import aiohttp
 
 from storage import iso_now
 from bcolors import bcolors
+from colors import Colors
+colored_output = True
 
 def process_artist_name_for_text_search(
     artist_name: str,

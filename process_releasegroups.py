@@ -10,6 +10,8 @@ import aiohttp
 
 from storage import iso_now
 from bcolors import bcolors
+from colors import Colors
+colored_output = True
 
 class SafeRateLimiter:
     """Production-safe rate limiter with circuit breaker and backoff"""

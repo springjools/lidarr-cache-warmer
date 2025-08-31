@@ -10,6 +10,8 @@ import aiohttp
 
 from storage import iso_now
 from bcolors import bcolors
+from colors import Colors
+colored_output = True
 
 def trigger_lidarr_refresh(base_url: str, api_key: str, artist_id: Optional[int], verify_ssl: bool = True) -> None:
     """Fire-and-forget refresh request to Lidarr for the given artist id."""

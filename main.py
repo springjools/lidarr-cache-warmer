@@ -366,6 +366,7 @@ def main():
 
     # Fetch data from Lidarr
     try:
+        various_artists_deleted = None
         print("Fetching artists from Lidarr...")
         artists = get_lidarr_artists(cfg["lidarr_url"], cfg["api_key"], cfg.get("verify_ssl", True), cfg["lidarr_timeout"])
         print(f"✅ Found {len(artists)} artists in Lidarr")
